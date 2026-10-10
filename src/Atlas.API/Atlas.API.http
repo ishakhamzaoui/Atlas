@@ -1,6 +1,54 @@
-@Atlas.API_HostAddress = http://localhost:5264
+@Atlas.API_HostAddress = http://localhost:5000
+# Paste values returned by the previous calls. Never commit real tokens or passwords.
+@token = <access-token>
+@userId = <user-guid>
 
-GET {{Atlas.API_HostAddress}}/weatherforecast/
-Accept: application/json
+### Login
+POST {{Atlas.API_HostAddress}}/api/v1/auth/login
+Content-Type: application/json
 
-###
+{ "username": "admin", "password": "<password>" }
+
+### Change password (required on first login)
+POST {{Atlas.API_HostAddress}}/api/v1/auth/change-password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "currentPassword": "<current-password>", "newPassword": "<new-password>", "confirmNewPassword": "<new-password>" }
+
+### Current user
+GET {{Atlas.API_HostAddress}}/api/v1/auth/me
+Authorization: Bearer {{token}}
+
+### Create user (admin)
+POST {{Atlas.API_HostAddress}}/api/v1/admin/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "username": "jdoe", "password": "<temporary-password>", "role": "User" }
+
+### List users (admin)
+GET {{Atlas.API_HostAddress}}/api/v1/admin/users?page=1&pageSize=20&search=jd&isActive=true
+Authorization: Bearer {{token}}
+
+### Get user (admin)
+GET {{Atlas.API_HostAddress}}/api/v1/admin/users/{{userId}}
+Authorization: Bearer {{token}}
+
+### Update user (admin)
+PUT {{Atlas.API_HostAddress}}/api/v1/admin/users/{{userId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "username": "jdoe", "role": "User" }
+
+### Activate / deactivate (admin)
+PATCH {{Atlas.API_HostAddress}}/api/v1/admin/users/{{userId}}/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "isActive": false }
+
+### Reset password (admin) - returns a one-time temporary password
+POST {{Atlas.API_HostAddress}}/api/v1/admin/users/{{userId}}/reset-password
+Authorization: Bearer {{token}}
