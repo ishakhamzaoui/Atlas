@@ -4,6 +4,7 @@ using Atlas.Application.Common.Exceptions;
 using Atlas.Domain.Users;
 using FluentValidation;
 using MediatR;
+using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application.Users.SetUserStatus;
 
@@ -16,9 +17,11 @@ public sealed class SetUserStatusCommandValidator : AbstractValidator<SetUserSta
 
 public sealed class SetUserStatusCommandHandler(
     IUserRepository users,
+    IRefreshTokenRepository refreshTokens,
     IUserWriteScope scope,
     ICurrentUser currentUser,
-    TimeProvider clock) : IRequestHandler<SetUserStatusCommand, UserDto>
+    TimeProvider clock,
+    ILogger<SetUserStatusCommandHandler> logger) : IRequestHandler<SetUserStatusCommand, UserDto>
 {
     public Task<UserDto> Handle(SetUserStatusCommand request, CancellationToken cancellationToken) =>
         scope.RunExclusiveAsync(async ct =>
@@ -35,9 +38,15 @@ public sealed class SetUserStatusCommandHandler(
             }
 
             var now = clock.GetUtcNow();
-            if (request.IsActive) user.Activate(now); else user.Deactivate(now);
+            if (request.IsActive) user.Activate(now);
+            else
+            {
+                user.Deactivate(now);
+                await refreshTokens.RevokeAllForUserAsync(user.Id, now, ct);
+            }
 
             await users.SaveChangesAsync(ct);
+            logger.LogInformation("Admin {ActorId} set user {UserId} active={IsActive}", currentUser.UserId, user.Id, user.IsActive);
             return user.ToDto();
         }, cancellationToken);
 }

@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace Atlas.Infrastructure;
@@ -39,9 +40,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IPasswordHasher>(_ => new BCryptPasswordHasher());
         services.AddSingleton<IPasswordGenerator, SecurePasswordGenerator>();
         services.AddSingleton<ITokenService, JwtTokenService>();
+        services.AddSingleton<IRefreshTokenProvider, RefreshTokenProvider>();
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IUserWriteScope, UserWriteScope>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddHostedService<RefreshTokenCleanupService>();
         services.AddScoped<IUserSessionValidator, UserSessionValidator>();
 
         return services;

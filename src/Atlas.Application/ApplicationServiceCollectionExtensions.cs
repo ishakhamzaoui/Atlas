@@ -1,3 +1,4 @@
+using Atlas.Application.Auth;
 using Atlas.Application.Bootstrap;
 using Atlas.Application.Common.Behaviors;
 using FluentValidation;
@@ -18,13 +19,15 @@ public static class ApplicationServiceCollectionExtensions
             if (!string.IsNullOrWhiteSpace(mediatRLicenseKey))
                 cfg.LicenseKey = mediatRLicenseKey;
 
-            // Order matters: authorization runs before validation.
+            // Order matters (outermost first): logging wraps authorization, which runs before validation.
+            cfg.AddOpenBehavior(typeof(LoggingBehavior<,>));
             cfg.AddOpenBehavior(typeof(AdminAuthorizationBehavior<,>));
             cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));
         });
 
         services.AddValidatorsFromAssembly(assembly, includeInternalTypes: true);
         services.AddScoped<AdminBootstrapper>();
+        services.AddScoped<SessionIssuer>();
         return services;
     }
 }

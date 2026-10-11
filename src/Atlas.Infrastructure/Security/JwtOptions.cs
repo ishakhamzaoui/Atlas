@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Options;
 
 namespace Atlas.Infrastructure.Security;
 
@@ -13,6 +13,12 @@ public sealed class JwtOptions
     public string SigningKey { get; set; } = string.Empty;
 
     public int AccessTokenMinutes { get; set; } = 15;
+
+    /// <summary>Sliding lifetime of one refresh token (each use rotates it).</summary>
+    public int RefreshTokenDays { get; set; } = 7;
+
+    /// <summary>Hard cap for a login session, however often it is refreshed.</summary>
+    public int RefreshTokenAbsoluteDays { get; set; } = 30;
 }
 
 public sealed class JwtOptionsValidator : IValidateOptions<JwtOptions>
@@ -33,6 +39,11 @@ public sealed class JwtOptionsValidator : IValidateOptions<JwtOptions>
 
         if (options.AccessTokenMinutes is < 1 or > 60)
             failures.Add("Jwt:AccessTokenMinutes must be between 1 and 60.");
+
+        if (options.RefreshTokenDays is < 1 or > 90)
+            failures.Add("Jwt:RefreshTokenDays must be between 1 and 90.");
+        if (options.RefreshTokenAbsoluteDays < options.RefreshTokenDays || options.RefreshTokenAbsoluteDays > 365)
+            failures.Add("Jwt:RefreshTokenAbsoluteDays must be >= RefreshTokenDays and <= 365.");
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
     }

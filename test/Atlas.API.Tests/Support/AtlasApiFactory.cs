@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using Atlas.Application.Auth;
@@ -9,11 +9,14 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.PostgreSql;
+using Atlas.Tests.Shared;
 
 namespace Atlas.API.Tests.Support;
 
-/// <summary>Boots the real API against a throwaway PostgreSQL container (requires Docker).</summary>
+/// <summary>
+/// Boots the real API against PostgreSQL: the dedicated native test database when ATLAS_TEST_DB is set
+/// (private schema per factory), otherwise a throwaway container.
+/// </summary>
 public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     public const string Issuer = "atlas-tests";
@@ -22,7 +25,7 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
     public const string AdminPermanentPassword = "Permanent#Admin-2026-qZ7";
     public const string InitialUserPassword = "Initial#Passw0rd-2026";
 
-    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder().WithImage("postgres:17-alpine").Build();
+    private TestDatabase _db = default!;
     private readonly Lazy<Task<AdminSession>> _adminSession;
 
     public AtlasApiFactory()
@@ -35,25 +38,31 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
 
     public sealed record AdminSession(LoginResponse FirstLogin, string Token);
 
+    // The API only speaks HTTPS, so test clients address it over https:// (TestServer sets Request.IsHttps accordingly).
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.BaseAddress = new Uri("https://localhost");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:Atlas", _db.GetConnectionString());
+        builder.UseSetting("ConnectionStrings:Atlas", _db.ConnectionString);
         builder.UseSetting("Jwt:Issuer", Issuer);
         builder.UseSetting("Jwt:Audience", Audience);
         builder.UseSetting("Jwt:SigningKey", SigningKey);
         builder.UseSetting("Jwt:AccessTokenMinutes", "15");
         builder.UseSetting("RateLimiting:AuthPermitLimit", "100000");
+        builder.UseSetting("Serilog:MinimumLevel:Default", "Warning"); // keep test output quiet
     }
 
     public async Task InitializeAsync()
     {
-        await _db.StartAsync();
+        _db = await TestDatabase.CreateAsync();
+        await _db.InitializeSchemaAsync();
 
         using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AtlasDbContext>();
-        if (db.Database.GetMigrations().Any()) await db.Database.MigrateAsync();
-        else await db.Database.EnsureCreatedAsync();
 
         // Real bootstrap path: creates 'admin' with a temporary password and MustChangePassword = true.
         var result = await scope.ServiceProvider.GetRequiredService<AdminBootstrapper>().RunAsync(BootstrapPassword, default);
@@ -62,6 +71,13 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
     }
 
     async Task IAsyncLifetime.DisposeAsync() => await _db.DisposeAsync();
+
+    public HttpClient CreateInsecureClient()
+    {
+        var client = CreateClient();
+        client.BaseAddress = new Uri("http://localhost");
+        return client;
+    }
 
     // ---------- helpers ----------
 
@@ -126,6 +142,13 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
     /// <summary>Creates a user and completes the forced password change, returning an unrestricted token.</summary>
     public async Task<(UserDto User, string Token, string Password)> CreateReadyUserAsync(string role = "User")
     {
+        var (user, session, password) = await CreateReadySessionAsync(role);
+        return (user, session.AccessToken, password);
+    }
+
+    /// <summary>Like <see cref="CreateReadyUserAsync"/> but returns the whole session (including the refresh token).</summary>
+    public async Task<(UserDto User, LoginResponse Session, string Password)> CreateReadySessionAsync(string role = "User")
+    {
         const string permanent = "Permanent#User-2026-mN4";
         var (user, temp) = await CreateUserAsync(role);
         var client = CreateClient();
@@ -136,7 +159,7 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
             new { currentPassword = temp, newPassword = permanent, confirmNewPassword = permanent });
         response.EnsureSuccessStatusCode();
         var changed = (await response.Content.ReadFromJsonAsync<LoginResponse>())!;
-        return (user, changed.AccessToken, permanent);
+        return (user, changed, permanent);
     }
 }
 

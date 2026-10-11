@@ -1,6 +1,7 @@
 using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Exceptions;
 using Atlas.Domain.Users;
+using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application.Bootstrap;
 
@@ -23,7 +24,11 @@ public sealed record BootstrapResult(BootstrapStatus Status, IReadOnlyList<strin
 /// Idempotent and takeover-proof: it does nothing once any administrator exists, never touches existing
 /// accounts, and is safe against concurrent runs because of the unique username index.
 /// </summary>
-public sealed class AdminBootstrapper(IUserRepository users, IPasswordHasher hasher, TimeProvider clock)
+public sealed class AdminBootstrapper(
+    IUserRepository users,
+    IPasswordHasher hasher,
+    TimeProvider clock,
+    ILogger<AdminBootstrapper> logger)
 {
     public const string AdminUsername = "admin";
 
@@ -31,17 +36,29 @@ public sealed class AdminBootstrapper(IUserRepository users, IPasswordHasher has
     {
         // Checked first: once initialised, the secret is not even looked at.
         if (await users.AnyAdminAsync(cancellationToken))
+        {
+            logger.LogInformation("Bootstrap skipped: an administrator already exists");
             return BootstrapResult.Of(BootstrapStatus.AlreadyInitialized);
+        }
 
         if (string.IsNullOrWhiteSpace(temporaryPassword))
+        {
+            logger.LogError("Bootstrap aborted: no temporary password configured; no account was created");
             return BootstrapResult.Of(BootstrapStatus.MissingPassword);
+        }
 
         var errors = PasswordPolicy.Validate(temporaryPassword, AdminUsername);
         if (errors.Count > 0)
+        {
+            logger.LogError("Bootstrap aborted: the temporary password violates the password policy ({ErrorCount} problems)", errors.Count);
             return new BootstrapResult(BootstrapStatus.WeakPassword, errors);
+        }
 
         if (await users.UsernameExistsAsync(UsernamePolicy.Normalize(AdminUsername), null, cancellationToken))
-            return BootstrapResult.Of(BootstrapStatus.UsernameTaken); // a non-admin "admin" exists; never take it over
+        {
+            logger.LogError("Bootstrap aborted: a non-administrator account named {Username} already exists", AdminUsername);
+            return BootstrapResult.Of(BootstrapStatus.UsernameTaken); // never take it over
+        }
 
         var admin = User.Create(AdminUsername, hasher.Hash(temporaryPassword), UserRole.Admin,
             mustChangePassword: true, clock.GetUtcNow());
@@ -52,9 +69,11 @@ public sealed class AdminBootstrapper(IUserRepository users, IPasswordHasher has
         }
         catch (ConflictException)
         {
-            return BootstrapResult.Of(BootstrapStatus.AlreadyInitialized); // lost a concurrent race
+            logger.LogInformation("Bootstrap lost a concurrent race; another instance created the administrator");
+            return BootstrapResult.Of(BootstrapStatus.AlreadyInitialized);
         }
 
+        logger.LogInformation("Bootstrap complete: administrator {UserId} created and must change its password", admin.Id);
         return BootstrapResult.Of(BootstrapStatus.Created);
     }
 }

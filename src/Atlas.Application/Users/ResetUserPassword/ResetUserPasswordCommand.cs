@@ -3,6 +3,7 @@ using Atlas.Application.Common.Behaviors;
 using Atlas.Application.Common.Exceptions;
 using FluentValidation;
 using MediatR;
+using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application.Users.ResetUserPassword;
 
@@ -18,10 +19,12 @@ public sealed class ResetUserPasswordCommandValidator : AbstractValidator<ResetU
 
 public sealed class ResetUserPasswordCommandHandler(
     IUserRepository users,
+    IRefreshTokenRepository refreshTokens,
     ICurrentUser currentUser,
     IPasswordHasher hasher,
     IPasswordGenerator generator,
-    TimeProvider clock) : IRequestHandler<ResetUserPasswordCommand, ResetPasswordResponse>
+    TimeProvider clock,
+    ILogger<ResetUserPasswordCommandHandler> logger) : IRequestHandler<ResetUserPasswordCommand, ResetPasswordResponse>
 {
     public async Task<ResetPasswordResponse> Handle(ResetUserPasswordCommand request, CancellationToken cancellationToken)
     {
@@ -33,8 +36,11 @@ public sealed class ResetUserPasswordCommandHandler(
                    ?? throw new NotFoundException("User not found.");
 
         var temporaryPassword = generator.Generate();
-        user.SetTemporaryPassword(hasher.Hash(temporaryPassword), clock.GetUtcNow());
+        var now = clock.GetUtcNow();
+        user.SetTemporaryPassword(hasher.Hash(temporaryPassword), now);
+        await refreshTokens.RevokeAllForUserAsync(user.Id, now, cancellationToken);
         await users.SaveChangesAsync(cancellationToken);
+        logger.LogWarning("Admin {ActorId} reset the password of user {UserId}; sessions revoked", currentUser.UserId, user.Id);
 
         return new ResetPasswordResponse(temporaryPassword, MustChangePassword: true);
     }

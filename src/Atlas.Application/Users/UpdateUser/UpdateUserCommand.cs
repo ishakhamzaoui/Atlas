@@ -5,6 +5,7 @@ using Atlas.Application.Common.Validation;
 using Atlas.Domain.Users;
 using FluentValidation;
 using MediatR;
+using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application.Users.UpdateUser;
 
@@ -23,9 +24,11 @@ public sealed class UpdateUserCommandValidator : AbstractValidator<UpdateUserCom
 
 public sealed class UpdateUserCommandHandler(
     IUserRepository users,
+    IRefreshTokenRepository refreshTokens,
     IUserWriteScope scope,
     ICurrentUser currentUser,
-    TimeProvider clock) : IRequestHandler<UpdateUserCommand, UserDto>
+    TimeProvider clock,
+    ILogger<UpdateUserCommandHandler> logger) : IRequestHandler<UpdateUserCommand, UserDto>
 {
     public Task<UserDto> Handle(UpdateUserCommand request, CancellationToken cancellationToken) =>
         scope.RunExclusiveAsync(async ct =>
@@ -54,7 +57,12 @@ public sealed class UpdateUserCommandHandler(
             if (roleChanges) user.ChangeRole(request.Role, now);
             if (renames) user.Rename(newUsername, now);
 
+            // Role/username are embedded in tokens, and the stamp rotated: end the user's refreshable sessions too.
+            if (roleChanges || renames) await refreshTokens.RevokeAllForUserAsync(user.Id, now, ct);
+
             await users.SaveChangesAsync(ct);
+            logger.LogInformation("Admin {ActorId} updated user {UserId} (roleChanged: {RoleChanged}, renamed: {Renamed})",
+                currentUser.UserId, user.Id, roleChanges, renames);
             return user.ToDto();
         }, cancellationToken);
 }

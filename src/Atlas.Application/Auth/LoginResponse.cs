@@ -1,14 +1,16 @@
-using Atlas.Application.Common;
 using Atlas.Application.Users;
-using Atlas.Domain.Users;
 
 namespace Atlas.Application.Auth;
 
-/// <param name="AccessToken">Signed JWT bearer token.</param>
+/// <param name="AccessToken">Signed, short-lived JWT bearer token.</param>
 /// <param name="TokenType">Always "Bearer".</param>
-/// <param name="ExpiresIn">Seconds until the token expires.</param>
+/// <param name="ExpiresIn">Seconds until the access token expires.</param>
 /// <param name="MustChangePassword">
-/// When true the token is restricted to <c>change-password</c> and <c>me</c> until the password is changed.
+/// When true the access token is restricted to <c>change-password</c> and <c>me</c>, and no refresh token is issued.
+/// </param>
+/// <param name="RefreshToken">
+/// Opaque, single-use token for <c>POST /api/v1/auth/refresh</c>. Store it securely; it is shown only once.
+/// Null while a password change is pending.
 /// </param>
 public sealed record LoginResponse(
     string AccessToken,
@@ -16,9 +18,6 @@ public sealed record LoginResponse(
     int ExpiresIn,
     DateTimeOffset ExpiresAt,
     bool MustChangePassword,
-    UserDto User)
-{
-    public static LoginResponse From(User user, AccessToken token, DateTimeOffset now) =>
-        new(token.Value, "Bearer", Math.Max(0, (int)(token.ExpiresAt - now).TotalSeconds), token.ExpiresAt,
-            user.MustChangePassword, user.ToDto());
-}
+    UserDto User,
+    string? RefreshToken = null,
+    DateTimeOffset? RefreshTokenExpiresAt = null);

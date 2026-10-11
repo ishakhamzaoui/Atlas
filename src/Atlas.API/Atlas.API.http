@@ -1,4 +1,4 @@
-@Atlas.API_HostAddress = http://localhost:5000
+@Atlas.API_HostAddress = https://localhost:7000
 # Paste values returned by the previous calls. Never commit real tokens or passwords.
 @token = <access-token>
 @userId = <user-guid>
@@ -8,6 +8,18 @@ POST {{Atlas.API_HostAddress}}/api/v1/auth/login
 Content-Type: application/json
 
 { "username": "admin", "password": "<password>" }
+
+### Refresh (exchange the single-use refresh token for a new pair)
+POST {{Atlas.API_HostAddress}}/api/v1/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "<refresh-token>" }
+
+### Logout (ends the session the refresh token belongs to)
+POST {{Atlas.API_HostAddress}}/api/v1/auth/logout
+Content-Type: application/json
+
+{ "refreshToken": "<refresh-token>" }
 
 ### Change password (required on first login)
 POST {{Atlas.API_HostAddress}}/api/v1/auth/change-password

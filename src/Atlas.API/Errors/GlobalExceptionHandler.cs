@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Atlas.Application.Common.Behaviors;
 using Atlas.Application.Common.Exceptions;
 using Atlas.Domain.Common;
 using FluentValidation;
@@ -51,7 +52,11 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
                 break;
 
             default:
-                logger.LogError(exception, "Unhandled exception for {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
+                // Faults inside MediatR requests are already logged (with the exception) by LoggingBehavior.
+                if (exception.Data.Contains(LoggingBehavior<object, object>.LoggedMarker))
+                    logger.LogDebug("Unexpected failure for {Method} {Path} was already logged", httpContext.Request.Method, httpContext.Request.Path);
+                else
+                    logger.LogError(exception, "Unhandled exception for {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
                 problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status500InternalServerError,

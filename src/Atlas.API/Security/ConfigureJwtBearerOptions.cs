@@ -38,7 +38,22 @@ internal sealed class ConfigureJwtBearerOptions(IOptions<JwtOptions> jwtOptions)
             RoleClaimType = AuthClaims.Role
         };
 
-        options.Events = new JwtBearerEvents { OnTokenValidated = ValidateSessionAsync };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = ValidateSessionAsync,
+            OnAuthenticationFailed = context =>
+            {
+                // Reason only (exception type); never the token. DEBUG because probes/garbage tokens are routine.
+                Logger(context.HttpContext).LogDebug("JWT rejected: {Reason}", context.Exception.GetType().Name);
+                return Task.CompletedTask;
+            },
+            OnForbidden = context =>
+            {
+                Logger(context.HttpContext).LogWarning("Access forbidden for user {UserId} on {Method} {Path}",
+                    context.Principal?.FindFirst(AuthClaims.Subject)?.Value, context.Request.Method, context.Request.Path);
+                return Task.CompletedTask;
+            }
+        };
     }
 
     /// <summary>
@@ -53,12 +68,19 @@ internal sealed class ConfigureJwtBearerOptions(IOptions<JwtOptions> jwtOptions)
 
         if (!hasUser || !hasStamp)
         {
+            Logger(context.HttpContext).LogWarning("Validly signed token without required claims was rejected");
             context.Fail("Token is missing required claims.");
             return;
         }
 
         var validator = context.HttpContext.RequestServices.GetRequiredService<IUserSessionValidator>();
         if (!await validator.IsSessionValidAsync(userId, stamp, context.HttpContext.RequestAborted))
+        {
+            Logger(context.HttpContext).LogInformation("Token for user {UserId} rejected: session no longer valid", userId);
             context.Fail("Session is no longer valid.");
+        }
     }
+
+    private static ILogger Logger(HttpContext httpContext) =>
+        httpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Atlas.API.Security.Jwt");
 }

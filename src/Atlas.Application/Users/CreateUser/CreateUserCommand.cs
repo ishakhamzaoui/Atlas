@@ -5,6 +5,7 @@ using Atlas.Application.Common.Validation;
 using Atlas.Domain.Users;
 using FluentValidation;
 using MediatR;
+using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application.Users.CreateUser;
 
@@ -21,8 +22,12 @@ public sealed class CreateUserCommandValidator : AbstractValidator<CreateUserCom
     }
 }
 
-public sealed class CreateUserCommandHandler(IUserRepository users, IPasswordHasher hasher, TimeProvider clock)
-    : IRequestHandler<CreateUserCommand, UserDto>
+public sealed class CreateUserCommandHandler(
+    IUserRepository users,
+    IPasswordHasher hasher,
+    ICurrentUser currentUser,
+    TimeProvider clock,
+    ILogger<CreateUserCommandHandler> logger) : IRequestHandler<CreateUserCommand, UserDto>
 {
     public async Task<UserDto> Handle(CreateUserCommand request, CancellationToken cancellationToken)
     {
@@ -35,6 +40,7 @@ public sealed class CreateUserCommandHandler(IUserRepository users, IPasswordHas
             mustChangePassword: true, clock.GetUtcNow());
 
         await users.AddAsync(user, cancellationToken); // unique index is the final arbiter under concurrency
+        logger.LogInformation("Admin {ActorId} created user {UserId} with role {Role}", currentUser.UserId, user.Id, user.Role);
         return user.ToDto();
     }
 }

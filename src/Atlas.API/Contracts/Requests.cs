@@ -26,6 +26,20 @@ public sealed record ChangePasswordRequest
     public string ConfirmNewPassword { get; init; } = string.Empty;
 }
 
+public sealed record RefreshRequest
+{
+    /// <summary>The refresh token from the last login/refresh response. It is single-use.</summary>
+    [DataType(DataType.Password)]
+    public string RefreshToken { get; init; } = string.Empty;
+}
+
+public sealed record LogoutRequest
+{
+    /// <summary>The refresh token whose session should be ended.</summary>
+    [DataType(DataType.Password)]
+    public string RefreshToken { get; init; } = string.Empty;
+}
+
 public sealed record CreateUserRequest
 {
     /// <example>jdoe</example>

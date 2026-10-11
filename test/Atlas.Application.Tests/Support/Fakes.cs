@@ -1,6 +1,7 @@
-using Atlas.Application.Common;
+﻿using Atlas.Application.Common;
 using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Exceptions;
+using Atlas.Domain.Auth;
 using Atlas.Domain.Users;
 
 namespace Atlas.Application.Tests.Support;
@@ -9,11 +10,17 @@ public sealed class FakeUserRepository : IUserRepository, IUserWriteScope
 {
     public List<User> Items { get; } = [];
 
+    /// <summary>When set, username lookups throw (simulates an infrastructure failure).</summary>
+    public Func<Exception>? FailLookupWith { get; set; }
+
     public Task<User?> GetByIdAsync(Guid id, CancellationToken ct) =>
         Task.FromResult(Items.FirstOrDefault(u => u.Id == id));
 
-    public Task<User?> GetByUsernameAsync(string normalizedUsername, CancellationToken ct) =>
-        Task.FromResult(Items.FirstOrDefault(u => u.NormalizedUsername == normalizedUsername));
+    public Task<User?> GetByUsernameAsync(string normalizedUsername, CancellationToken ct)
+    {
+        if (FailLookupWith is not null) throw FailLookupWith();
+        return Task.FromResult(Items.FirstOrDefault(u => u.NormalizedUsername == normalizedUsername));
+    }
 
     public Task<bool> UsernameExistsAsync(string normalizedUsername, Guid? excludingUserId, CancellationToken ct) =>
         Task.FromResult(Items.Any(u => u.NormalizedUsername == normalizedUsername && u.Id != excludingUserId));
@@ -76,10 +83,10 @@ public sealed class FakePasswordGenerator : IPasswordGenerator
     public string Generate() => Value;
 }
 
-public sealed class FakeTokenService : ITokenService
+public sealed class FakeTokenService(TimeProvider clock) : ITokenService
 {
     public AccessToken Create(User user) =>
-        new($"token-for-{user.Username}-{(user.MustChangePassword ? "restricted" : "full")}", DateTimeOffset.UtcNow.AddMinutes(15));
+        new($"token-for-{user.Username}-{(user.MustChangePassword ? "restricted" : "full")}", clock.GetUtcNow().AddMinutes(15));
 }
 
 public sealed class FakeCurrentUser : ICurrentUser
@@ -103,5 +110,75 @@ public sealed class FakeCurrentUser : ICurrentUser
         UserId = null;
         Username = null;
         IsAdmin = false;
+    }
+}
+
+public sealed class FakeRefreshTokenProvider : IRefreshTokenProvider
+{
+    private int _counter;
+
+    public TimeSpan Lifetime { get; set; } = TimeSpan.FromDays(7);
+    public TimeSpan AbsoluteLifetime { get; set; } = TimeSpan.FromDays(30);
+
+    public GeneratedRefreshToken Generate()
+    {
+        var token = $"refresh-token-{Interlocked.Increment(ref _counter)}";
+        return new GeneratedRefreshToken(token, Hash(token));
+    }
+
+    public string Hash(string token) => "hashed:" + token;
+}
+
+public sealed class FakeRefreshTokenRepository : IRefreshTokenRepository
+{
+    public List<RefreshToken> Items { get; } = [];
+
+    public Task<RefreshToken?> GetByHashAsync(string tokenHash, CancellationToken ct) =>
+        Task.FromResult(Items.FirstOrDefault(t => t.TokenHash == tokenHash));
+
+    public void Add(RefreshToken token) => Items.Add(token);
+
+    public Task RevokeFamilyAsync(Guid familyId, DateTimeOffset now, CancellationToken ct)
+    {
+        foreach (var token in Items.Where(t => t.FamilyId == familyId && !t.IsRevoked)) token.Revoke(now);
+        return Task.CompletedTask;
+    }
+
+    public Task RevokeAllForUserAsync(Guid userId, DateTimeOffset now, CancellationToken ct)
+    {
+        foreach (var token in Items.Where(t => t.UserId == userId && !t.IsRevoked)) token.Revoke(now);
+        return Task.CompletedTask;
+    }
+
+    public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
+}
+
+public sealed class MutableClock(DateTimeOffset start) : TimeProvider
+{
+    private DateTimeOffset _now = start;
+    public override DateTimeOffset GetUtcNow() => _now;
+    public void Advance(TimeSpan by) => _now += by;
+}
+
+public sealed record CapturedLog(Microsoft.Extensions.Logging.LogLevel Level, string Category, string Message, Exception? Exception);
+
+public sealed class CapturingLoggerProvider : Microsoft.Extensions.Logging.ILoggerProvider
+{
+    private readonly List<CapturedLog> _entries = [];
+    public IReadOnlyList<CapturedLog> Entries { get { lock (_entries) return _entries.ToList(); } }
+
+    public Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
+    public void Dispose() { }
+
+    private sealed class Logger(CapturingLoggerProvider owner, string category) : Microsoft.Extensions.Logging.ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (owner._entries) owner._entries.Add(new CapturedLog(logLevel, category, formatter(state, exception), exception));
+        }
     }
 }
