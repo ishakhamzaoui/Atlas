@@ -200,6 +200,31 @@ Status codes: 400, 401, 403, 404, 409 conflict, 422 business rule, 429 rate limi
 
 In `Development`: `https://<host>/swagger`. Call `login`, click **Authorize**, paste the `accessToken`. Not mapped in other environments.
 
+## Setting up a development VM (collaboration through GitHub)
+
+Every developer VM is independent: its own PostgreSQL (dev + test databases), its own user-secrets (connection string, JWT key, TLS certificate) and its own checkout. Nothing secret or machine-specific is shared; **GitHub is the only thing the VMs have in common**, so they never need to be online at the same time.
+
+On a fresh Ubuntu Server (24.04/26.04+) in the LAN, as a normal user with sudo (not root):
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/ishakhamzaoui/Atlas/main/scripts/setup-dev-vm.sh
+less setup-dev-vm.sh        # review it first
+GIT_USER_NAME="Your Name" GIT_USER_EMAIL="you@example.com" bash setup-dev-vm.sh
+```
+
+It installs git, openssl, PostgreSQL and the .NET 10 SDK + `dotnet-ef` (natively, no Docker), creates the `atlas` and `atlas_test` databases with generated passwords, clones this repository, creates a self-signed LAN certificate, lets the app bind ports 80/443 without root, sets the user-secrets, restores/builds, applies the committed migrations to the dev database and runs the whole test suite. It is **idempotent**: re-run it after any `git pull` to migrate, rebuild and retest. Options (`ATLAS_DIR`, `ATLAS_BRANCH`, `TLS_EXTRA_SANS`, `SKIP_TLS`, `SKIP_PORTS`, `SKIP_TESTS`, `BOOTSTRAP_ADMIN=1`) are documented at the top of the script; the log is `~/atlas-setup.log` (mode 600).
+
+Generated secrets live only in `~/.config/atlas/dev.env` (mode 600, also exports `ATLAS_TEST_DB`) and in `dotnet user-secrets`. PostgreSQL stays bound to localhost.
+
+To push from the VM, add the SSH public key printed at the end to GitHub (the script clones over HTTPS and pushes over SSH).
+
+Working together:
+
+* Work on branches and merge through pull requests; keep `main` green (`dotnet build Atlas.slnx && dotnet test Atlas.slnx`).
+* **Migrations are source code.** Generate a migration on one VM only, commit it, and let the other VM receive it with `git pull` + `dotnet ef database update`
+  (the setup script does the update for you). Do not generate migrations for the same model change on both VMs - you would get conflicting snapshots.
+* Each VM has its own JWT signing key and certificate, so tokens and trust relationships are per VM (clients must trust each VM's certificate).
+
 ## Build and test
 
 ```bash
