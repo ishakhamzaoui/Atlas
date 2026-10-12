@@ -1,4 +1,5 @@
 ﻿using Atlas.Application.Common.Abstractions;
+using Atlas.Application.Common.Results;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -39,8 +40,34 @@ public sealed class AppFixture : IDisposable
     public Task<TResponse> Send<TResponse>(IRequest<TResponse> request) =>
         _provider.GetRequiredService<ISender>().Send(request);
 
-    public Task Send(IRequest request) =>
-        _provider.GetRequiredService<ISender>().Send(request);
+    /// <summary>Sends a request that must succeed and returns its value.</summary>
+    public async Task<T> Ok<T>(IRequest<Result<T>> request)
+    {
+        var result = await Send(request);
+        Assert.True(result.IsSuccess, $"Expected success but got {result.Error?.Code}: {result.Error?.Message}");
+        return result.Value;
+    }
+
+    /// <summary>Sends a request that must fail with the given error type (and optional code); returns the error.</summary>
+    public async Task<Error> Fail<T>(IRequest<Result<T>> request, ErrorType type, string? code = null)
+    {
+        var result = await Send(request);
+        return AssertFailure(result, type, code);
+    }
+
+    public async Task OkVoid(IRequest<Result> request)
+    {
+        var result = await Send(request);
+        Assert.True(result.IsSuccess, $"Expected success but got {result.Error?.Code}");
+    }
+
+    public static Error AssertFailure(Result result, ErrorType type, string? code)
+    {
+        Assert.True(result.IsFailure, "Expected a failure but the request succeeded.");
+        Assert.Equal(type, result.Error!.Type);
+        if (code is not null) Assert.Equal(code, result.Error.Code);
+        return result.Error;
+    }
 
     /// <summary>Seeds an active, fully-set-up admin and signs in as them.</summary>
     public Atlas.Domain.Users.User SignInAsAdmin(string name = "root.admin")

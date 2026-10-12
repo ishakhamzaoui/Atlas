@@ -1,5 +1,5 @@
 using Atlas.Application.Common.Abstractions;
-using Atlas.Application.Common.Exceptions;
+using Atlas.Application.Common.Results;
 using Atlas.Application.Common.Validation;
 using FluentValidation;
 using MediatR;
@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Atlas.Application.Auth.ChangePassword;
 
 public sealed record ChangePasswordCommand(string CurrentPassword, string NewPassword, string ConfirmNewPassword)
-    : IRequest<LoginResponse>;
+    : IRequest<Result<LoginResponse>>;
 
 public sealed class ChangePasswordCommandValidator : AbstractValidator<ChangePasswordCommand>
 {
@@ -28,23 +28,26 @@ public sealed class ChangePasswordCommandHandler(
     IPasswordHasher hasher,
     SessionIssuer issuer,
     TimeProvider clock,
-    ILogger<ChangePasswordCommandHandler> logger) : IRequestHandler<ChangePasswordCommand, LoginResponse>
+    ILogger<ChangePasswordCommandHandler> logger) : IRequestHandler<ChangePasswordCommand, Result<LoginResponse>>
 {
-    public async Task<LoginResponse> Handle(ChangePasswordCommand request, CancellationToken cancellationToken)
+    public async Task<Result<LoginResponse>> Handle(ChangePasswordCommand request, CancellationToken cancellationToken)
     {
-        var userId = currentUser.UserId ?? throw new UnauthorizedException("unauthenticated", "Authentication is required.");
-        var user = await users.GetByIdAsync(userId, cancellationToken)
-                   ?? throw new UnauthorizedException("unauthenticated", "Authentication is required.");
+        if (currentUser.UserId is not { } userId)
+            return Error.Unauthenticated();
+
+        var user = await users.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+            return Error.Unauthenticated();
 
         // Required for everyone, including the forced first-login change (the temporary password is the "current" one).
         if (!hasher.Verify(request.CurrentPassword, user.PasswordHash))
         {
             logger.LogWarning("Password change rejected for user {UserId}: wrong current password", user.Id);
-            throw new BusinessRuleException("invalid_current_password", "The current password is incorrect.");
+            return Error.BusinessRule("invalid_current_password", "The current password is incorrect.");
         }
 
         if (hasher.Verify(request.NewPassword, user.PasswordHash))
-            throw new BusinessRuleException("password_unchanged", "The new password must be different from the current password.");
+            return Error.BusinessRule("password_unchanged", "The new password must be different from the current password.");
 
         var now = clock.GetUtcNow();
         user.ChangePassword(hasher.Hash(request.NewPassword), now);

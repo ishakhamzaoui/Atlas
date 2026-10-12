@@ -30,7 +30,7 @@ public sealed class RefreshTokenRepository(AtlasDbContext db) : IRefreshTokenRep
         }
         catch (DbUpdateConcurrencyException)
         {
-            throw new ConflictException("concurrent_update", "The record was modified by someone else. Reload and try again.");
+            throw new PersistenceConflictException(PersistenceConflictKind.ConcurrentUpdate);
         }
     }
 }

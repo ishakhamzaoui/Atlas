@@ -14,10 +14,9 @@ using Microsoft.AspNetCore.RateLimiting;
 
 namespace Atlas.API.Controllers;
 
-[ApiController]
 [Route("api/v1/auth")]
 [Produces("application/json")]
-public sealed class AuthController(ISender sender) : ControllerBase
+public sealed class AuthController(ISender sender) : ApiControllerBase
 {
     /// <summary>Authenticate with username and password and receive a JWT access token.</summary>
     /// <remarks>
@@ -32,7 +31,7 @@ public sealed class AuthController(ISender sender) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken) =>
-        Ok(await sender.Send(new LoginCommand(request.Username, request.Password), cancellationToken));
+        Respond(await sender.Send(new LoginCommand(request.Username, request.Password), cancellationToken));
 
     /// <summary>Exchange a refresh token for a new access token and a new refresh token.</summary>
     /// <remarks>
@@ -48,7 +47,7 @@ public sealed class AuthController(ISender sender) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<LoginResponse>> Refresh(RefreshRequest request, CancellationToken cancellationToken) =>
-        Ok(await sender.Send(new RefreshTokenCommand(request.RefreshToken), cancellationToken));
+        Respond(await sender.Send(new RefreshTokenCommand(request.RefreshToken), cancellationToken));
 
     /// <summary>End the session that the refresh token belongs to.</summary>
     /// <remarks>
@@ -63,8 +62,8 @@ public sealed class AuthController(ISender sender) : ControllerBase
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> Logout(LogoutRequest request, CancellationToken cancellationToken)
     {
-        await sender.Send(new LogoutCommand(request.RefreshToken), cancellationToken);
-        return NoContent();
+        var result = await sender.Send(new LogoutCommand(request.RefreshToken), cancellationToken);
+        return Respond(result, () => NoContent());
     }
 
     /// <summary>Change the caller's password (mandatory on first login).</summary>
@@ -81,7 +80,7 @@ public sealed class AuthController(ISender sender) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<LoginResponse>> ChangePassword(ChangePasswordRequest request, CancellationToken cancellationToken) =>
-        Ok(await sender.Send(
+        Respond(await sender.Send(
             new ChangePasswordCommand(request.CurrentPassword, request.NewPassword, request.ConfirmNewPassword),
             cancellationToken));
 
@@ -91,5 +90,5 @@ public sealed class AuthController(ISender sender) : ControllerBase
     [ProducesResponseType<UserDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<UserDto>> Me(CancellationToken cancellationToken) =>
-        Ok(await sender.Send(new GetCurrentUserQuery(), cancellationToken));
+        Respond(await sender.Send(new GetCurrentUserQuery(), cancellationToken));
 }

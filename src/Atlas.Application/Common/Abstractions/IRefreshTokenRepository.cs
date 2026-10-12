@@ -15,6 +15,6 @@ public interface IRefreshTokenRepository
     /// <summary>Immediately revokes every still-active token of the user (all devices).</summary>
     Task RevokeAllForUserAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken);
 
-    /// <summary>Persists staged changes. Maps optimistic-concurrency failures to <c>ConflictException</c>.</summary>
+    /// <summary>Persists staged changes. Maps optimistic-concurrency failures to <c>PersistenceConflictException</c>.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

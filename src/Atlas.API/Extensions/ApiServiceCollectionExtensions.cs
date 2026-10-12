@@ -30,6 +30,13 @@ public static class ApiServiceCollectionExtensions
         services.AddControllers(o => o.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true)
             .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
+        // HTTP -> HTTPS redirection on the default ports (80 -> 443). 308 preserves the HTTP method and body.
+        services.AddHttpsRedirection(options =>
+        {
+            options.RedirectStatusCode = StatusCodes.Status308PermanentRedirect;
+            options.HttpsPort = configuration.GetValue("Server:HttpsPort", 443);
+        });
+
         services.AddProblemDetails();
         services.AddExceptionHandler<GlobalExceptionHandler>();
 

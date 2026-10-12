@@ -1,6 +1,7 @@
 using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Behaviors;
 using Atlas.Application.Common.Exceptions;
+using Atlas.Application.Common.Results;
 using Atlas.Application.Common.Validation;
 using Atlas.Domain.Users;
 using FluentValidation;
@@ -10,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace Atlas.Application.Users.CreateUser;
 
 public sealed record CreateUserCommand(string Username, string Password, UserRole Role)
-    : IRequest<UserDto>, IRequireAdmin;
+    : IRequest<Result<UserDto>>, IRequireAdmin;
 
 public sealed class CreateUserCommandValidator : AbstractValidator<CreateUserCommand>
 {
@@ -27,19 +28,27 @@ public sealed class CreateUserCommandHandler(
     IPasswordHasher hasher,
     ICurrentUser currentUser,
     TimeProvider clock,
-    ILogger<CreateUserCommandHandler> logger) : IRequestHandler<CreateUserCommand, UserDto>
+    ILogger<CreateUserCommandHandler> logger) : IRequestHandler<CreateUserCommand, Result<UserDto>>
 {
-    public async Task<UserDto> Handle(CreateUserCommand request, CancellationToken cancellationToken)
+    public async Task<Result<UserDto>> Handle(CreateUserCommand request, CancellationToken cancellationToken)
     {
         var normalized = UsernamePolicy.Normalize(request.Username);
         if (await users.UsernameExistsAsync(normalized, null, cancellationToken))
-            throw new ConflictException("username_taken", "That username is already in use.");
+            return Error.Conflict("username_taken", "That username is already in use.");
 
         // Admin-issued passwords are always temporary: the user must choose their own at first login.
         var user = User.Create(request.Username, hasher.Hash(request.Password), request.Role,
             mustChangePassword: true, clock.GetUtcNow());
 
-        await users.AddAsync(user, cancellationToken); // unique index is the final arbiter under concurrency
+        try
+        {
+            await users.AddAsync(user, cancellationToken); // the unique index is the final arbiter under concurrency
+        }
+        catch (PersistenceConflictException ex)
+        {
+            return PersistenceErrors.From(ex);
+        }
+
         logger.LogInformation("Admin {ActorId} created user {UserId} with role {Role}", currentUser.UserId, user.Id, user.Role);
         return user.ToDto();
     }

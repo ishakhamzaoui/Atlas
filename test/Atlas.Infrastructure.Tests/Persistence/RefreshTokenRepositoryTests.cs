@@ -1,4 +1,4 @@
-using Atlas.Application.Common.Exceptions;
+﻿using Atlas.Application.Common.Exceptions;
 using Atlas.Domain.Auth;
 using Atlas.Domain.Users;
 using Atlas.Infrastructure.Persistence.Repositories;
@@ -117,8 +117,8 @@ public class RefreshTokenRepositoryTests(PostgresFixture postgres) : IClassFixtu
         await repo1.SaveChangesAsync(default);
 
         t2!.Revoke(Now, Guid.NewGuid());
-        var ex = await Assert.ThrowsAsync<ConflictException>(() => repo2.SaveChangesAsync(default));
-        Assert.Equal("concurrent_update", ex.Code);
+        var ex = await Assert.ThrowsAsync<PersistenceConflictException>(() => repo2.SaveChangesAsync(default));
+        Assert.Equal(PersistenceConflictKind.ConcurrentUpdate, ex.Kind);
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-using Atlas.Application.Common.Abstractions;
+﻿using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Exceptions;
 using Atlas.Domain.Users;
 using Atlas.Infrastructure.Persistence;
@@ -42,10 +42,10 @@ public class UserRepositoryTests(PostgresFixture postgres) : IClassFixture<Postg
             await new UserRepository(db).AddAsync(NewUser(name), default);
 
         await using var db2 = postgres.CreateContext();
-        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
+        var ex = await Assert.ThrowsAsync<PersistenceConflictException>(() =>
             new UserRepository(db2).AddAsync(NewUser(name.ToLowerInvariant()), default));
 
-        Assert.Equal("username_taken", ex.Code);
+        Assert.Equal(PersistenceConflictKind.DuplicateUsername, ex.Kind);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public class UserRepositoryTests(PostgresFixture postgres) : IClassFixture<Postg
         {
             await using var db = postgres.CreateContext();
             try { await new UserRepository(db).AddAsync(NewUser(name), default); return true; }
-            catch (ConflictException) { return false; }
+            catch (PersistenceConflictException) { return false; }
         }
 
         var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => TryInsert()));
@@ -141,8 +141,8 @@ public class UserRepositoryTests(PostgresFixture postgres) : IClassFixture<Postg
         await repo1.SaveChangesAsync(default);
 
         u2!.ChangePassword("hash-B", DateTimeOffset.UtcNow);
-        var ex = await Assert.ThrowsAsync<ConflictException>(() => repo2.SaveChangesAsync(default));
-        Assert.Equal("concurrent_update", ex.Code);
+        var ex = await Assert.ThrowsAsync<PersistenceConflictException>(() => repo2.SaveChangesAsync(default));
+        Assert.Equal(PersistenceConflictKind.ConcurrentUpdate, ex.Kind);
     }
 
     [Fact]

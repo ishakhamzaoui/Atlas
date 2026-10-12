@@ -67,7 +67,7 @@ public sealed class AdminBootstrapper(
         {
             await users.AddAsync(admin, cancellationToken);
         }
-        catch (ConflictException)
+        catch (PersistenceConflictException)
         {
             logger.LogInformation("Bootstrap lost a concurrent race; another instance created the administrator");
             return BootstrapResult.Of(BootstrapStatus.AlreadyInitialized);

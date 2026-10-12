@@ -1,4 +1,4 @@
-using Atlas.Domain.Users;
+﻿using Atlas.Domain.Users;
 
 namespace Atlas.Application.Common.Abstractions;
 
@@ -13,9 +13,9 @@ public interface IUserRepository
     Task<int> CountActiveAdminsAsync(Guid excludingUserId, CancellationToken cancellationToken);
     Task<PagedResult<User>> ListAsync(UserListFilter filter, CancellationToken cancellationToken);
 
-    /// <summary>Persists a new user. Throws <c>ConflictException("username_taken")</c> on a duplicate username.</summary>
+    /// <summary>Persists a new user. Throws <c>PersistenceConflictException(DuplicateUsername)</c> on a duplicate username.</summary>
     Task AddAsync(User user, CancellationToken cancellationToken);
 
-    /// <summary>Persists tracked changes. Maps unique and concurrency violations to <c>ConflictException</c>.</summary>
+    /// <summary>Persists tracked changes. Maps unique and concurrency violations to <c>PersistenceConflictException</c>.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

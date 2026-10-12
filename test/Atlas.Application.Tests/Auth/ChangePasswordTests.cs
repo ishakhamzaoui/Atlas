@@ -1,7 +1,6 @@
-using Atlas.Application.Auth.ChangePassword;
-using Atlas.Application.Common.Exceptions;
+﻿using Atlas.Application.Auth.ChangePassword;
+using Atlas.Application.Common.Results;
 using Atlas.Application.Tests.Support;
-using FluentValidation;
 
 namespace Atlas.Application.Tests.Auth;
 
@@ -18,7 +17,7 @@ public class ChangePasswordTests
         app.Current.SignInAs(user);
         var stamp = user.SecurityStamp;
 
-        var result = await app.Send(new ChangePasswordCommand(Temp, NewPassword, NewPassword));
+        var result = await app.Ok(new ChangePasswordCommand(Temp, NewPassword, NewPassword));
 
         Assert.False(user.MustChangePassword);
         Assert.Equal(FakePasswordHasher.HashOf(NewPassword), user.PasswordHash);
@@ -34,10 +33,9 @@ public class ChangePasswordTests
         var user = app.Users.Seed("john", mustChange: true, password: Temp);
         app.Current.SignInAs(user);
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            app.Send(new ChangePasswordCommand("Wrong#Passw0rd1", NewPassword, NewPassword)));
+        await app.Fail(new ChangePasswordCommand("Wrong#Passw0rd1", NewPassword, NewPassword),
+            ErrorType.BusinessRule, "invalid_current_password");
 
-        Assert.Equal("invalid_current_password", ex.Code);
         Assert.True(user.MustChangePassword);
         Assert.Equal(FakePasswordHasher.HashOf(Temp), user.PasswordHash);
     }
@@ -49,10 +47,8 @@ public class ChangePasswordTests
         var user = app.Users.Seed("john", mustChange: true, password: Temp);
         app.Current.SignInAs(user);
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            app.Send(new ChangePasswordCommand(Temp, Temp, Temp)));
+        await app.Fail(new ChangePasswordCommand(Temp, Temp, Temp), ErrorType.BusinessRule, "password_unchanged");
 
-        Assert.Equal("password_unchanged", ex.Code);
         Assert.True(user.MustChangePassword);
     }
 
@@ -65,8 +61,7 @@ public class ChangePasswordTests
         var user = app.Users.Seed("john", mustChange: true, password: Temp);
         app.Current.SignInAs(user);
 
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            app.Send(new ChangePasswordCommand(Temp, newPassword, confirm)));
+        await app.Fail(new ChangePasswordCommand(Temp, newPassword, confirm), ErrorType.Validation);
         Assert.True(user.MustChangePassword);
     }
 
@@ -74,7 +69,6 @@ public class ChangePasswordTests
     public async Task Anonymous_caller_is_unauthorized()
     {
         using var app = new AppFixture();
-        await Assert.ThrowsAsync<UnauthorizedException>(() =>
-            app.Send(new ChangePasswordCommand(Temp, NewPassword, NewPassword)));
+        await app.Fail(new ChangePasswordCommand(Temp, NewPassword, NewPassword), ErrorType.Unauthorized, "unauthenticated");
     }
 }

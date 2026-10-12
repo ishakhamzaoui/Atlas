@@ -1,5 +1,5 @@
 using Atlas.Application.Common.Abstractions;
-using Atlas.Application.Common.Exceptions;
+using Atlas.Application.Common.Results;
 using Atlas.Domain.Users;
 using FluentValidation;
 using MediatR;
@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application.Auth.Login;
 
-public sealed record LoginCommand(string Username, string Password) : IRequest<LoginResponse>;
+public sealed record LoginCommand(string Username, string Password) : IRequest<Result<LoginResponse>>;
 
 public sealed class LoginCommandValidator : AbstractValidator<LoginCommand>
 {
@@ -23,9 +23,9 @@ public sealed class LoginCommandHandler(
     IRefreshTokenRepository refreshTokens,
     IPasswordHasher hasher,
     SessionIssuer issuer,
-    ILogger<LoginCommandHandler> logger) : IRequestHandler<LoginCommand, LoginResponse>
+    ILogger<LoginCommandHandler> logger) : IRequestHandler<LoginCommand, Result<LoginResponse>>
 {
-    public async Task<LoginResponse> Handle(LoginCommand request, CancellationToken cancellationToken)
+    public async Task<Result<LoginResponse>> Handle(LoginCommand request, CancellationToken cancellationToken)
     {
         var normalized = UsernamePolicy.Normalize(request.Username);
         var user = await users.GetByUsernameAsync(normalized, cancellationToken);
@@ -41,7 +41,7 @@ public sealed class LoginCommandHandler(
             var reason = user is null ? "unknown_user" : !passwordMatches ? "wrong_password" : "inactive_account";
             logger.LogWarning("Login failed ({Reason}) for user {UserId}", reason, user?.Id);
             logger.LogDebug("Failed login attempted username {Username}", normalized);
-            throw new UnauthorizedException();
+            return Error.Unauthorized();
         }
 
         var session = issuer.Issue(user);

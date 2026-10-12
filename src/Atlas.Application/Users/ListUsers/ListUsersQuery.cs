@@ -1,6 +1,7 @@
 using Atlas.Application.Common;
 using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Behaviors;
+using Atlas.Application.Common.Results;
 using Atlas.Domain.Users;
 using FluentValidation;
 using MediatR;
@@ -8,7 +9,7 @@ using MediatR;
 namespace Atlas.Application.Users.ListUsers;
 
 public sealed record ListUsersQuery(int Page, int PageSize, string? Search, UserRole? Role, bool? IsActive)
-    : IRequest<PagedResult<UserDto>>, IRequireAdmin;
+    : IRequest<Result<PagedResult<UserDto>>>, IRequireAdmin;
 
 public sealed class ListUsersQueryValidator : AbstractValidator<ListUsersQuery>
 {
@@ -24,9 +25,9 @@ public sealed class ListUsersQueryValidator : AbstractValidator<ListUsersQuery>
 }
 
 public sealed class ListUsersQueryHandler(IUserRepository users)
-    : IRequestHandler<ListUsersQuery, PagedResult<UserDto>>
+    : IRequestHandler<ListUsersQuery, Result<PagedResult<UserDto>>>
 {
-    public async Task<PagedResult<UserDto>> Handle(ListUsersQuery request, CancellationToken cancellationToken)
+    public async Task<Result<PagedResult<UserDto>>> Handle(ListUsersQuery request, CancellationToken cancellationToken)
     {
         var page = await users.ListAsync(
             new UserListFilter(request.Page, request.PageSize, request.Search, request.Role, request.IsActive),

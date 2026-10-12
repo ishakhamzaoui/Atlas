@@ -1,4 +1,4 @@
-using Atlas.Application.Common.Exceptions;
+using Atlas.Application.Common.Results;
 using Atlas.Application.Tests.Support;
 using Atlas.Application.Users.GetUser;
 using Atlas.Application.Users.ListUsers;
@@ -29,7 +29,10 @@ public class AdminOnlyTests
         };
 
         foreach (var request in requests)
-            await Assert.ThrowsAsync<ForbiddenException>(() => app.Get<ISender>().Send(request));
+        {
+            var result = (Result)(await app.Get<ISender>().Send(request))!;
+            AppFixture.AssertFailure(result, ErrorType.Forbidden, "forbidden");
+        }
 
         Assert.True(target.IsActive);
         Assert.Equal(UserRole.User, target.Role);
@@ -43,15 +46,15 @@ public class AdminOnlyTests
         for (var i = 1; i <= 5; i++) app.Users.Seed($"worker{i}");
         app.Users.Seed("sleeper", active: false);
 
-        var page2 = await app.Send(new ListUsersQuery(2, 2, "WORK", null, null));
+        var page2 = await app.Ok(new ListUsersQuery(2, 2, "WORK", null, null));
         Assert.Equal(5, page2.TotalCount);
         Assert.Equal(3, page2.TotalPages);
         Assert.Equal(["worker3", "worker4"], page2.Items.Select(u => u.Username).ToArray());
 
-        var inactive = await app.Send(new ListUsersQuery(1, 10, null, null, false));
+        var inactive = await app.Ok(new ListUsersQuery(1, 10, null, null, false));
         Assert.Equal("sleeper", Assert.Single(inactive.Items).Username);
 
-        var admins = await app.Send(new ListUsersQuery(1, 10, null, UserRole.Admin, null));
+        var admins = await app.Ok(new ListUsersQuery(1, 10, null, UserRole.Admin, null));
         Assert.Equal("root.admin", Assert.Single(admins.Items).Username);
     }
 
@@ -59,13 +62,12 @@ public class AdminOnlyTests
     [InlineData(0, 10)]
     [InlineData(1, 0)]
     [InlineData(1, 101)]
-    public async Task Invalid_paging_is_rejected(int page, int size)
+    public async Task Invalid_paging_is_a_validation_failure(int page, int size)
     {
         using var app = new AppFixture();
         app.SignInAsAdmin();
 
-        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() =>
-            app.Send(new ListUsersQuery(page, size, null, null, null)));
+        await app.Fail(new ListUsersQuery(page, size, null, null, null), ErrorType.Validation);
     }
 
     [Fact]
@@ -74,6 +76,6 @@ public class AdminOnlyTests
         using var app = new AppFixture();
         app.SignInAsAdmin();
 
-        await Assert.ThrowsAsync<NotFoundException>(() => app.Send(new GetUserQuery(Guid.NewGuid())));
+        await app.Fail(new GetUserQuery(Guid.NewGuid()), ErrorType.NotFound);
     }
 }

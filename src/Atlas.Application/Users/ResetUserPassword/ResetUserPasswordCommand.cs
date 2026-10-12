@@ -1,13 +1,13 @@
 using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Behaviors;
-using Atlas.Application.Common.Exceptions;
+using Atlas.Application.Common.Results;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application.Users.ResetUserPassword;
 
-public sealed record ResetUserPasswordCommand(Guid Id) : IRequest<ResetPasswordResponse>, IRequireAdmin;
+public sealed record ResetUserPasswordCommand(Guid Id) : IRequest<Result<ResetPasswordResponse>>, IRequireAdmin;
 
 /// <param name="TemporaryPassword">Shown exactly once. Communicate it out-of-band; the user must change it at next login.</param>
 public sealed record ResetPasswordResponse(string TemporaryPassword, bool MustChangePassword);
@@ -24,24 +24,25 @@ public sealed class ResetUserPasswordCommandHandler(
     IPasswordHasher hasher,
     IPasswordGenerator generator,
     TimeProvider clock,
-    ILogger<ResetUserPasswordCommandHandler> logger) : IRequestHandler<ResetUserPasswordCommand, ResetPasswordResponse>
+    ILogger<ResetUserPasswordCommandHandler> logger) : IRequestHandler<ResetUserPasswordCommand, Result<ResetPasswordResponse>>
 {
-    public async Task<ResetPasswordResponse> Handle(ResetUserPasswordCommand request, CancellationToken cancellationToken)
+    public async Task<Result<ResetPasswordResponse>> Handle(ResetUserPasswordCommand request, CancellationToken cancellationToken)
     {
         if (currentUser.UserId == request.Id)
-            throw new BusinessRuleException("cannot_reset_own_password",
+            return Error.BusinessRule("cannot_reset_own_password",
                 "Use the change-password endpoint to change your own password.");
 
-        var user = await users.GetByIdAsync(request.Id, cancellationToken)
-                   ?? throw new NotFoundException("User not found.");
+        var user = await users.GetByIdAsync(request.Id, cancellationToken);
+        if (user is null)
+            return Error.NotFound("User not found.");
 
         var temporaryPassword = generator.Generate();
         var now = clock.GetUtcNow();
         user.SetTemporaryPassword(hasher.Hash(temporaryPassword), now);
         await refreshTokens.RevokeAllForUserAsync(user.Id, now, cancellationToken);
         await users.SaveChangesAsync(cancellationToken);
-        logger.LogWarning("Admin {ActorId} reset the password of user {UserId}; sessions revoked", currentUser.UserId, user.Id);
 
+        logger.LogWarning("Admin {ActorId} reset the password of user {UserId}; sessions revoked", currentUser.UserId, user.Id);
         return new ResetPasswordResponse(temporaryPassword, MustChangePassword: true);
     }
 }

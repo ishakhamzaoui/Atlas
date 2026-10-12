@@ -2,7 +2,7 @@
 
 ASP.NET Core (.NET 10) Web API on Clean Architecture with PostgreSQL, EF Core, MediatR, FluentValidation,
 JWT bearer authentication with rotating refresh tokens, BCrypt password hashing and Serilog logging.
-Login uses **username + password only** (no email). The API is served **over HTTPS only**.
+Login uses **username + password only** (no email). The API is served over **HTTPS** (port 443); plain HTTP (port 80) only redirects to it.
 
 ```
 Atlas.Domain         -> (nothing)            User, RefreshToken, roles, username/password policies, invariants
@@ -21,9 +21,9 @@ Atlas.API            -> Application, Infrastructure   Controllers, JWT bearer, p
 | `Jwt:AccessTokenMinutes` | `Jwt__AccessTokenMinutes` | Default 15 (1-60) |
 | `Jwt:RefreshTokenDays` | `Jwt__RefreshTokenDays` | Sliding lifetime of one refresh token, default 7 (1-90) |
 | `Jwt:RefreshTokenAbsoluteDays` | `Jwt__RefreshTokenAbsoluteDays` | Hard cap for a whole login session, default 30 (>= sliding, <= 365) |
-| `Urls` | `ASPNETCORE_URLS` | Default `https://0.0.0.0:7000`. Any `http://` URL aborts startup. |
+| `Urls` | `ASPNETCORE_URLS` | Default `http://0.0.0.0:80;https://0.0.0.0:443` (default ports, all interfaces) |
 | `Kestrel:Certificates:Default:Path` / `KeyPath` / `Password` | `Kestrel__Certificates__Default__Path` ... | TLS certificate (PEM or PFX), see below |
-| `Server:RequireHttps` | `Server__RequireHttps` | Default `true`: requests not received over TLS get 400 `https_required` |
+| `Server:HttpsPort` | `Server__HttpsPort` | Port used in redirect `Location` headers, default 443 (omitted from the URL) |
 | `Bootstrap:AdminPassword` | `Bootstrap__AdminPassword` | Only read by `--bootstrap-admin` |
 | `RateLimiting:AuthPermitLimit` / `AuthWindowSeconds` | `RateLimiting__...` | Per-IP limit on login/refresh/logout/change-password (10 per 60 s) |
 | `Serilog:MinimumLevel:Default` | `Serilog__MinimumLevel__Default` | See Logging |
@@ -36,11 +36,26 @@ dotnet user-secrets set "ConnectionStrings:Atlas" "Host=localhost;Port=5432;Data
 dotnet user-secrets set "Jwt:SigningKey" "$(openssl rand -base64 48)" --project src/Atlas.API
 ```
 
-## HTTPS only, reachable from the LAN
+## HTTPS with HTTP redirect, reachable from the LAN
 
-The server binds `https://0.0.0.0:7000` (all interfaces => reachable from the LAN) and has **no HTTP listener**:
-there is no port 80/5000 and no redirect. Safeguards: startup fails if an `http://` URL is configured
-(`ASPNETCORE_URLS`, launch profile, `Urls`), a middleware answers 400 `https_required` for any non-TLS request, and HSTS is sent outside Development.
+The server listens on the **default ports on all interfaces** (so it is reachable from the LAN): `https://0.0.0.0:443` serves the API and
+`http://0.0.0.0:80` exists only to answer **308 Permanent Redirect** to the same URL on HTTPS (method and body are preserved, so a redirected
+`POST` is retried as a `POST`). HSTS is sent outside Development so browsers stop using HTTP after the first visit.
+
+> The redirect cannot protect a secret that was already sent in a plain-HTTP request. Configure clients and Swagger with `https://` URLs from the start.
+
+**Binding ports 80/443 without root.** Ports below 1024 are privileged on Linux. Pick one:
+
+```bash
+# a) systemd service (recommended): in the unit file
+#      [Service]
+#      AmbientCapabilities=CAP_NET_BIND_SERVICE
+#      CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# b) allow unprivileged binding from port 80 up, system-wide
+echo 'net.ipv4.ip_unprivileged_port_start=80' | sudo tee /etc/sysctl.d/99-atlas-ports.conf && sudo sysctl --system
+# c) `dotnet run` during development: grant the capability to the dotnet host binary
+sudo setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(which dotnet)")"
+```
 
 **Certificate.** Kestrel needs one. For development `dotnet dev-certs https` works on the machine itself, but LAN clients will not trust it.
 For the LAN create a certificate whose names match how clients address the server (replace host/IP), or use your own CA:
@@ -55,11 +70,33 @@ export Kestrel__Certificates__Default__Path=/etc/atlas/tls/atlas.crt
 export Kestrel__Certificates__Default__KeyPath=/etc/atlas/tls/atlas.key
 ```
 
-Import `atlas.crt` into each client's trust store (or use `curl --cacert atlas.crt`). Open the port only to your LAN, e.g.
-`sudo ufw allow from 192.168.1.0/24 to any port 7000 proto tcp`. If you later put a TLS-terminating reverse proxy in front,
-configure forwarded headers and set `Server:RequireHttps=false` deliberately. `AllowedHosts` is `*` so any LAN name/IP works; restrict it if you prefer.
+Import `atlas.crt` into each client's trust store (or use `curl --cacert atlas.crt`). Open both ports to your LAN only, e.g.
+`sudo ufw allow from 192.168.1.0/24 to any port 80,443 proto tcp`. Behind a TLS-terminating reverse proxy, configure forwarded headers instead
+(otherwise the app would redirect proxied requests forever). `AllowedHosts` is `*` so any LAN name/IP works; restrict it if you prefer.
 
-Run: `ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/Atlas.API` (the `https` launch profile is HTTPS-only too).
+Run: `ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/Atlas.API` (the launch profile binds the same two ports).
+
+## Error handling
+
+Expected failures are **values, not exceptions**. Every use case returns a `Result` / `Result<T>`; a failure carries an `Error` (`Code`, `Message`, `Type`,
+plus per-field messages for validation). `Type` decides the HTTP status in exactly one place (`ProblemMapping`):
+
+| ErrorType | HTTP | Typical codes |
+|---|---|---|
+| Validation | 400 | `validation_failed` (with `errors` per field) |
+| Unauthorized | 401 | `invalid_credentials`, `invalid_refresh_token`, `unauthenticated` |
+| Forbidden | 403 | `forbidden` |
+| NotFound | 404 | `not_found` |
+| Conflict | 409 | `username_taken`, `concurrent_update` |
+| BusinessRule | 422 | `last_active_admin`, `invalid_current_password`, `password_unchanged`, ... |
+
+Pipeline order: **logging -> admin authorization -> validation -> handler**. Authorization and validation short-circuit with a failure `Result`; nothing is thrown
+for a weak password, a duplicate username or wrong credentials, so there is no stack trace and no `ERR` line. Those outcomes are logged once as `WRN`
+(request type, error code, no content). Controllers translate results through `ApiControllerBase`.
+
+Exceptions remain only for the unexpected: the database arbitrating a race (`PersistenceConflictException`, mapped to 409 and logged as a warning),
+a broken domain invariant (422, warning) and genuine faults (500 with a generic body, logged **once** as `ERR` with the stack trace). Serilog's request logging wraps the
+exception handler, so a handled error is reported with its real status instead of a misleading 500.
 
 ## Logging
 
@@ -156,12 +193,12 @@ POST /api/v1/auth/logout    { "refreshToken": "<refresh-token>" }
 POST /api/v1/auth/change-password { "currentPassword": "<current>", "newPassword": "<new>", "confirmNewPassword": "<new>" }
 ```
 
-Errors are RFC 7807 `application/problem+json` with a stable `code` (`validation_failed`, `invalid_credentials`, `invalid_refresh_token`, `username_taken`, `last_active_admin`, `https_required`, ...).
+Errors are RFC 7807 `application/problem+json` with a stable `code` (`validation_failed`, `invalid_credentials`, `invalid_refresh_token`, `username_taken`, `last_active_admin`, ...).
 Status codes: 400, 401, 403, 404, 409 conflict, 422 business rule, 429 rate limited.
 
 ## Swagger
 
-In `Development`: `https://<host>:7000/swagger`. Call `login`, click **Authorize**, paste the `accessToken`. Not mapped in other environments.
+In `Development`: `https://<host>/swagger`. Call `login`, click **Authorize**, paste the `accessToken`. Not mapped in other environments.
 
 ## Build and test
 
@@ -170,9 +207,10 @@ dotnet build Atlas.slnx
 dotnet test Atlas.slnx
 ```
 
-### Running the integration tests natively on the VM (no Docker)
+### Integration tests: native PostgreSQL only (no Docker)
 
-Create a **dedicated** test database once (script needs `sudo -u postgres`):
+Nothing in this project uses Docker or containers. Integration tests run against a **dedicated, natively installed** PostgreSQL test database.
+Create it once (the script needs `sudo -u postgres`):
 
 ```bash
 ./scripts/create-test-db.sh            # prints the export line below with a generated password
@@ -182,7 +220,7 @@ dotnet test Atlas.slnx
 
 Equivalent manual SQL: `CREATE ROLE atlas_test LOGIN PASSWORD '<pw>'; CREATE DATABASE atlas_test OWNER atlas_test;`
 
-How the fixtures use it: when `ATLAS_TEST_DB` is set, every fixture (each Infrastructure test class, the API factory) creates its **own throw-away schema**
-inside that database, builds it from the real EF migrations (or from the model if no migration exists yet), points the app under test at it, and drops the schema afterwards.
-Fixtures and test projects can therefore run in parallel without sharing data, and nothing persists between runs. The database name **must contain "test"**, otherwise the tests refuse to run.
-If `ATLAS_TEST_DB` is not set, the fixtures fall back to a disposable PostgreSQL container (requires Docker). The test database is separate from the development database, and the connection string is never committed.
+How the fixtures use it: every fixture (each Infrastructure test class, the API factory) creates its **own throw-away schema** inside that database, builds it from the
+real EF migrations, points the app under test at it, and drops the schema afterwards. Fixtures and test projects can therefore run in parallel without sharing data, and nothing
+persists between runs. The database name **must contain "test"**, otherwise the tests refuse to run. If `ATLAS_TEST_DB` is missing the database tests fail immediately with
+instructions. The test database is separate from the development database, and the connection string is never committed.

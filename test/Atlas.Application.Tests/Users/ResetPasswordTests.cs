@@ -1,4 +1,4 @@
-using Atlas.Application.Common.Exceptions;
+﻿using Atlas.Application.Common.Results;
 using Atlas.Application.Tests.Support;
 using Atlas.Application.Users.ResetUserPassword;
 
@@ -14,7 +14,7 @@ public class ResetPasswordTests
         var user = app.Users.Seed("john", mustChange: false, password: "Old#Passw0rd-xyz1");
         var stamp = user.SecurityStamp;
 
-        var response = await app.Send(new ResetUserPasswordCommand(user.Id));
+        var response = await app.Ok(new ResetUserPasswordCommand(user.Id));
 
         Assert.Equal(FakePasswordGenerator.Value, response.TemporaryPassword);
         Assert.True(response.MustChangePassword);
@@ -29,8 +29,7 @@ public class ResetPasswordTests
         using var app = new AppFixture();
         var admin = app.SignInAsAdmin();
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => app.Send(new ResetUserPasswordCommand(admin.Id)));
-        Assert.Equal("cannot_reset_own_password", ex.Code);
+        await app.Fail(new ResetUserPasswordCommand(admin.Id), ErrorType.BusinessRule, "cannot_reset_own_password");
     }
 
     [Fact]
@@ -39,6 +38,6 @@ public class ResetPasswordTests
         using var app = new AppFixture();
         app.SignInAsAdmin();
 
-        await Assert.ThrowsAsync<NotFoundException>(() => app.Send(new ResetUserPasswordCommand(Guid.NewGuid())));
+        await app.Fail(new ResetUserPasswordCommand(Guid.NewGuid()), ErrorType.NotFound);
     }
 }

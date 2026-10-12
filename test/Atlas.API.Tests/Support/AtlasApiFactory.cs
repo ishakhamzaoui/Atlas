@@ -10,12 +10,14 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Atlas.Tests.Shared;
+using Serilog.Core;
+using Serilog.Events;
 
 namespace Atlas.API.Tests.Support;
 
 /// <summary>
-/// Boots the real API against PostgreSQL: the dedicated native test database when ATLAS_TEST_DB is set
-/// (private schema per factory), otherwise a throwaway container.
+/// Boots the real API against the dedicated native PostgreSQL test database from ATLAS_TEST_DB
+/// (a private, throw-away schema per factory).
 /// </summary>
 public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
@@ -34,6 +36,9 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
     }
 
     /// <summary>Random per test run; never a real secret.</summary>
+    /// <summary>Every log event the application writes during the tests (to assert on error handling).</summary>
+    public CapturingSink Logs { get; } = new();
+
     public string SigningKey { get; } = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
 
     public sealed record AdminSession(LoginResponse FirstLogin, string Token);
@@ -55,6 +60,7 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
         builder.UseSetting("Jwt:AccessTokenMinutes", "15");
         builder.UseSetting("RateLimiting:AuthPermitLimit", "100000");
         builder.UseSetting("Serilog:MinimumLevel:Default", "Warning"); // keep test output quiet
+        builder.ConfigureServices(services => services.AddSingleton<ILogEventSink>(Logs));
     }
 
     public async Task InitializeAsync()
@@ -72,9 +78,10 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
 
     async Task IAsyncLifetime.DisposeAsync() => await _db.DisposeAsync();
 
+    /// <summary>A plain-HTTP client that does NOT follow redirects, to observe the HTTP-to-HTTPS redirect itself.</summary>
     public HttpClient CreateInsecureClient()
     {
-        var client = CreateClient();
+        var client = CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         client.BaseAddress = new Uri("http://localhost");
         return client;
     }
@@ -165,3 +172,14 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
 
 [CollectionDefinition("api")]
 public sealed class ApiCollection : ICollectionFixture<AtlasApiFactory>;
+
+public sealed class CapturingSink : ILogEventSink
+{
+    private readonly List<LogEvent> _events = [];
+
+    public IReadOnlyList<LogEvent> Events { get { lock (_events) return _events.ToList(); } }
+
+    public void Clear() { lock (_events) _events.Clear(); }
+
+    public void Emit(LogEvent logEvent) { lock (_events) _events.Add(logEvent); }
+}

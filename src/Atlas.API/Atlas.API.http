@@ -1,4 +1,4 @@
-@Atlas.API_HostAddress = https://localhost:7000
+@Atlas.API_HostAddress = https://localhost
 # Paste values returned by the previous calls. Never commit real tokens or passwords.
 @token = <access-token>
 @userId = <user-guid>

@@ -28,46 +28,8 @@ if (args.Contains("--bootstrap-admin", StringComparer.Ordinal))
     return exitCode;
 }
 
-// HTTPS only: refuse to start if any plain-HTTP address is configured (ASPNETCORE_URLS, launch profile, Urls setting).
-// (Checked against both the server's address list and the raw "urls" setting, which also carries ASPNETCORE_URLS / --urls.)
-var configuredUrls = (app.Configuration["urls"] ?? string.Empty)
-    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-var insecureUrls = app.Urls.Concat(configuredUrls)
-    .Where(u => u.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-    .Distinct()
-    .ToList();
-if (insecureUrls.Count > 0)
-{
-    throw new InvalidOperationException(
-        $"Plain HTTP endpoints are not allowed ({string.Join(", ", insecureUrls)}). Configure HTTPS URLs only, " +
-        "e.g. ASPNETCORE_URLS=https://0.0.0.0:7000, and a Kestrel certificate.");
-}
-
-app.UseExceptionHandler();
-
-// Defense in depth: reject any request that did not arrive over TLS (e.g. through a misconfigured proxy).
-if (app.Configuration.GetValue("Server:RequireHttps", true))
-{
-    app.Use(async (context, next) =>
-    {
-        if (!context.Request.IsHttps)
-        {
-            app.Logger.LogWarning("Rejected non-HTTPS request {Method} {Path} from {RemoteIp}",
-                context.Request.Method, context.Request.Path, context.Connection.RemoteIpAddress);
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsJsonAsync(new { title = "HTTPS is required.", code = "https_required" });
-            return;
-        }
-
-        await next();
-    });
-}
-
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHsts(); // browsers will only talk HTTPS to this host from now on
-}
-
+// Outermost on purpose: it must see the FINAL status code, after the exception handler below has turned any
+// exception into a response. (Placed inside the handler it would log every handled exception as an HTTP 500 error.)
 app.UseSerilogRequestLogging(options =>
 {
     options.GetLevel = (httpContext, _, exception) =>
@@ -82,6 +44,16 @@ app.UseSerilogRequestLogging(options =>
         diagnosticContext.Set("UserId", httpContext.User.FindFirst("sub")?.Value);
     };
 });
+
+app.UseExceptionHandler();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts(); // browsers that reached the site over HTTPS will only use HTTPS from now on
+}
+
+// Plain HTTP (port 80) only exists to redirect to HTTPS (port 443): 308 keeps the method and body of the retried request.
+app.UseHttpsRedirection();
 
 // Never let browsers/proxies cache API responses (they can contain tokens or one-time temporary passwords).
 app.Use(async (context, next) =>

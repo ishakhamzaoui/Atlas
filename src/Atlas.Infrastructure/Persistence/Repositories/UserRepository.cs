@@ -57,7 +57,7 @@ public sealed class UserRepository(AtlasDbContext db) : IUserRepository
         {
             await SaveAsync(cancellationToken);
         }
-        catch (ConflictException)
+        catch (PersistenceConflictException)
         {
             db.Entry(user).State = EntityState.Detached;
             throw;
@@ -74,11 +74,11 @@ public sealed class UserRepository(AtlasDbContext db) : IUserRepository
         }
         catch (DbUpdateConcurrencyException)
         {
-            throw new ConflictException("concurrent_update", "The record was modified by someone else. Reload and try again.");
+            throw new PersistenceConflictException(PersistenceConflictKind.ConcurrentUpdate);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
-            throw new ConflictException("username_taken", "That username is already in use.");
+            throw new PersistenceConflictException(PersistenceConflictKind.DuplicateUsername);
         }
     }
 }

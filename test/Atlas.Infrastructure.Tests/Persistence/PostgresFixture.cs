@@ -1,11 +1,11 @@
-using Atlas.Infrastructure.Persistence;
+﻿using Atlas.Infrastructure.Persistence;
 using Atlas.Tests.Shared;
 
 namespace Atlas.Infrastructure.Tests.Persistence;
 
 /// <summary>
-/// Uses the dedicated native test database when ATLAS_TEST_DB is set (isolated schema per fixture),
-/// otherwise a throw-away PostgreSQL container. Never touches a real/dev database.
+/// Uses the dedicated native test database from ATLAS_TEST_DB (an isolated, throw-away schema per fixture).
+/// Never touches a real/dev database.
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {

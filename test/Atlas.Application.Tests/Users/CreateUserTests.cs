@@ -1,8 +1,7 @@
-using Atlas.Application.Common.Exceptions;
+using Atlas.Application.Common.Results;
 using Atlas.Application.Tests.Support;
 using Atlas.Application.Users.CreateUser;
 using Atlas.Domain.Users;
-using FluentValidation;
 
 namespace Atlas.Application.Tests.Users;
 
@@ -16,7 +15,7 @@ public class CreateUserTests
         using var app = new AppFixture();
         app.SignInAsAdmin();
 
-        var dto = await app.Send(new CreateUserCommand("JohnDoe", GoodPassword, UserRole.User));
+        var dto = await app.Ok(new CreateUserCommand("JohnDoe", GoodPassword, UserRole.User));
 
         Assert.Equal("JohnDoe", dto.Username);
         Assert.Equal("User", dto.Role);
@@ -29,16 +28,13 @@ public class CreateUserTests
     }
 
     [Fact]
-    public async Task Duplicate_username_differing_only_by_case_is_rejected()
+    public async Task Duplicate_username_differing_only_by_case_is_a_conflict()
     {
         using var app = new AppFixture();
         app.SignInAsAdmin();
-        await app.Send(new CreateUserCommand("JohnDoe", GoodPassword, UserRole.User));
+        await app.Ok(new CreateUserCommand("JohnDoe", GoodPassword, UserRole.User));
 
-        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
-            app.Send(new CreateUserCommand("johndoe", GoodPassword, UserRole.User)));
-
-        Assert.Equal("username_taken", ex.Code);
+        await app.Fail(new CreateUserCommand("johndoe", GoodPassword, UserRole.User), ErrorType.Conflict, "username_taken");
     }
 
     [Theory]
@@ -47,14 +43,30 @@ public class CreateUserTests
     [InlineData("john", "weak")]
     [InlineData("john", "NoSymbolsHere12345")]
     [InlineData("john", "My-john-Passw0rd!")] // contains username
-    public async Task Invalid_input_fails_validation(string username, string password)
+    public async Task Invalid_input_returns_a_validation_failure_without_throwing(string username, string password)
     {
         using var app = new AppFixture();
         app.SignInAsAdmin();
 
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            app.Send(new CreateUserCommand(username, password, UserRole.User)));
+        var error = await app.Fail(new CreateUserCommand(username, password, UserRole.User), ErrorType.Validation, "validation_failed");
+
+        Assert.NotEmpty(error.ValidationErrors!);
         Assert.Single(app.Users.Items); // only the seeded admin
+    }
+
+    [Fact]
+    public async Task Weak_password_reports_every_broken_rule_under_the_password_field()
+    {
+        using var app = new AppFixture();
+        app.SignInAsAdmin();
+
+        var error = await app.Fail(new CreateUserCommand("john", "weak", UserRole.User), ErrorType.Validation);
+
+        var messages = error.ValidationErrors!["password"];
+        Assert.Contains(messages, m => m.Contains("at least 12"));
+        Assert.Contains(messages, m => m.Contains("uppercase"));
+        Assert.Contains(messages, m => m.Contains("digit"));
+        Assert.Contains(messages, m => m.Contains("symbol"));
     }
 
     [Fact]
@@ -63,8 +75,7 @@ public class CreateUserTests
         using var app = new AppFixture();
         app.SignInAsAdmin();
 
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            app.Send(new CreateUserCommand("john", GoodPassword, (UserRole)42)));
+        await app.Fail(new CreateUserCommand("john", GoodPassword, (UserRole)42), ErrorType.Validation);
     }
 
     [Fact]
@@ -73,8 +84,7 @@ public class CreateUserTests
         using var app = new AppFixture();
         app.Current.SignInAs(app.Users.Seed("regular", UserRole.User));
 
-        await Assert.ThrowsAsync<ForbiddenException>(() =>
-            app.Send(new CreateUserCommand("john", GoodPassword, UserRole.User)));
+        await app.Fail(new CreateUserCommand("john", GoodPassword, UserRole.User), ErrorType.Forbidden);
     }
 
     [Fact]
@@ -82,7 +92,16 @@ public class CreateUserTests
     {
         using var app = new AppFixture();
 
-        await Assert.ThrowsAsync<UnauthorizedException>(() =>
-            app.Send(new CreateUserCommand("john", GoodPassword, UserRole.User)));
+        await app.Fail(new CreateUserCommand("john", GoodPassword, UserRole.User), ErrorType.Unauthorized, "unauthenticated");
+    }
+
+    [Fact]
+    public async Task Authorization_is_checked_before_validation()
+    {
+        using var app = new AppFixture();
+        app.Current.SignInAs(app.Users.Seed("regular", UserRole.User));
+
+        // invalid AND forbidden: the caller learns nothing about validation rules
+        await app.Fail(new CreateUserCommand("x", "weak", UserRole.User), ErrorType.Forbidden);
     }
 }

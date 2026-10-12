@@ -50,7 +50,7 @@ public sealed class FakeUserRepository : IUserRepository, IUserWriteScope
     public Task AddAsync(User user, CancellationToken ct)
     {
         if (Items.Any(u => u.NormalizedUsername == user.NormalizedUsername))
-            throw new ConflictException("username_taken", "That username is already in use.");
+            throw new PersistenceConflictException(PersistenceConflictKind.DuplicateUsername);
         Items.Add(user);
         return Task.CompletedTask;
     }

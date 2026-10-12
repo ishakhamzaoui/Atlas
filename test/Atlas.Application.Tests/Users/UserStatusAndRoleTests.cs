@@ -1,4 +1,4 @@
-using Atlas.Application.Common.Exceptions;
+﻿using Atlas.Application.Common.Results;
 using Atlas.Application.Tests.Support;
 using Atlas.Application.Users.SetUserStatus;
 using Atlas.Application.Users.UpdateUser;
@@ -16,11 +16,11 @@ public class UserStatusAndRoleTests
         var user = app.Users.Seed("john");
         var stamp = user.SecurityStamp;
 
-        var off = await app.Send(new SetUserStatusCommand(user.Id, false));
+        var off = await app.Ok(new SetUserStatusCommand(user.Id, false));
         Assert.False(off.IsActive);
         Assert.NotEqual(stamp, user.SecurityStamp); // existing tokens die
 
-        var on = await app.Send(new SetUserStatusCommand(user.Id, true));
+        var on = await app.Ok(new SetUserStatusCommand(user.Id, true));
         Assert.True(on.IsActive);
     }
 
@@ -31,7 +31,7 @@ public class UserStatusAndRoleTests
         app.SignInAsAdmin("actor.admin");
         var other = app.Users.Seed("other.admin", UserRole.Admin);
 
-        var dto = await app.Send(new SetUserStatusCommand(other.Id, false));
+        var dto = await app.Ok(new SetUserStatusCommand(other.Id, false));
 
         Assert.False(dto.IsActive);
     }
@@ -42,8 +42,7 @@ public class UserStatusAndRoleTests
         using var app = new AppFixture();
         var admin = app.SignInAsAdmin();
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => app.Send(new SetUserStatusCommand(admin.Id, false)));
-        Assert.Equal("cannot_deactivate_self", ex.Code);
+        await app.Fail(new SetUserStatusCommand(admin.Id, false), ErrorType.BusinessRule, "cannot_deactivate_self");
         Assert.True(admin.IsActive);
     }
 
@@ -56,8 +55,7 @@ public class UserStatusAndRoleTests
         var staleActor = app.Users.Seed("stale.admin", UserRole.Admin, active: false);
         app.Current.SignInAs(staleActor);
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => app.Send(new SetUserStatusCommand(lastAdmin.Id, false)));
-        Assert.Equal("last_active_admin", ex.Code);
+        await app.Fail(new SetUserStatusCommand(lastAdmin.Id, false), ErrorType.BusinessRule, "last_active_admin");
     }
 
     [Fact]
@@ -67,9 +65,7 @@ public class UserStatusAndRoleTests
         var admin = app.SignInAsAdmin();
         app.Users.Seed("another.admin", UserRole.Admin);
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            app.Send(new UpdateUserCommand(admin.Id, admin.Username, UserRole.User)));
-        Assert.Equal("cannot_change_own_role", ex.Code);
+        await app.Fail(new UpdateUserCommand(admin.Id, admin.Username, UserRole.User), ErrorType.BusinessRule, "cannot_change_own_role");
         Assert.Equal(UserRole.Admin, admin.Role);
     }
 
@@ -80,9 +76,7 @@ public class UserStatusAndRoleTests
         var lastAdmin = app.Users.Seed("last.admin", UserRole.Admin);
         app.Current.SignInAs(app.Users.Seed("stale.admin", UserRole.Admin, active: false));
 
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            app.Send(new UpdateUserCommand(lastAdmin.Id, lastAdmin.Username, UserRole.User)));
-        Assert.Equal("last_active_admin", ex.Code);
+        await app.Fail(new UpdateUserCommand(lastAdmin.Id, lastAdmin.Username, UserRole.User), ErrorType.BusinessRule, "last_active_admin");
         Assert.Equal(UserRole.Admin, lastAdmin.Role);
     }
 
@@ -93,10 +87,10 @@ public class UserStatusAndRoleTests
         app.SignInAsAdmin();
         var user = app.Users.Seed("john");
 
-        var promoted = await app.Send(new UpdateUserCommand(user.Id, "john", UserRole.Admin));
+        var promoted = await app.Ok(new UpdateUserCommand(user.Id, "john", UserRole.Admin));
         Assert.Equal("Admin", promoted.Role);
 
-        var demoted = await app.Send(new UpdateUserCommand(user.Id, "john", UserRole.User));
+        var demoted = await app.Ok(new UpdateUserCommand(user.Id, "john", UserRole.User));
         Assert.Equal("User", demoted.Role);
     }
 
@@ -108,9 +102,7 @@ public class UserStatusAndRoleTests
         app.Users.Seed("taken.name");
         var user = app.Users.Seed("john");
 
-        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
-            app.Send(new UpdateUserCommand(user.Id, "TAKEN.NAME", UserRole.User)));
-        Assert.Equal("username_taken", ex.Code);
+        await app.Fail(new UpdateUserCommand(user.Id, "TAKEN.NAME", UserRole.User), ErrorType.Conflict, "username_taken");
         Assert.Equal("john", user.Username);
     }
 
@@ -121,7 +113,7 @@ public class UserStatusAndRoleTests
         app.SignInAsAdmin();
         var user = app.Users.Seed("john");
 
-        var dto = await app.Send(new UpdateUserCommand(user.Id, "John", UserRole.User));
+        var dto = await app.Ok(new UpdateUserCommand(user.Id, "John", UserRole.User));
         Assert.Equal("John", dto.Username);
     }
 }

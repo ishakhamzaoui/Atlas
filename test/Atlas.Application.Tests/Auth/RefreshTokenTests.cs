@@ -1,13 +1,12 @@
-using Atlas.Application.Auth.ChangePassword;
+﻿using Atlas.Application.Auth.ChangePassword;
 using Atlas.Application.Auth.Login;
 using Atlas.Application.Auth.Logout;
 using Atlas.Application.Auth.Refresh;
-using Atlas.Application.Common.Exceptions;
+using Atlas.Application.Common.Results;
 using Atlas.Application.Tests.Support;
 using Atlas.Application.Users.ResetUserPassword;
 using Atlas.Application.Users.UpdateUser;
 using Atlas.Domain.Users;
-using FluentValidation;
 
 namespace Atlas.Application.Tests.Auth;
 
@@ -19,7 +18,7 @@ public class RefreshTokenTests
     {
         var app = new AppFixture();
         var user = app.Users.Seed("john", role, password: Password);
-        var login = await app.Send(new LoginCommand("john", Password));
+        var login = await app.Ok(new LoginCommand("john", Password));
         return (app, user, login);
     }
 
@@ -45,7 +44,7 @@ public class RefreshTokenTests
         using var app = new AppFixture();
         app.Users.Seed("john", mustChange: true, password: Password);
 
-        var login = await app.Send(new LoginCommand("john", Password));
+        var login = await app.Ok(new LoginCommand("john", Password));
 
         Assert.True(login.MustChangePassword);
         Assert.Null(login.RefreshToken);
@@ -59,7 +58,7 @@ public class RefreshTokenTests
         using var _ = app;
         app.Clock.Advance(TimeSpan.FromMinutes(5));
 
-        var refreshed = await app.Send(new RefreshTokenCommand(login.RefreshToken!));
+        var refreshed = await app.Ok(new RefreshTokenCommand(login.RefreshToken!));
 
         Assert.NotEqual(login.RefreshToken, refreshed.RefreshToken);
         Assert.False(string.IsNullOrWhiteSpace(refreshed.AccessToken));
@@ -77,14 +76,14 @@ public class RefreshTokenTests
     {
         var (app, _, login) = await LoggedIn();
         using var _ = app;
-        var second = await app.Send(new RefreshTokenCommand(login.RefreshToken!));
+        var second = await app.Ok(new RefreshTokenCommand(login.RefreshToken!));
 
         // replay of the first token (e.g. a thief who copied it)
-        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(login.RefreshToken!)));
+        var ex = await app.Fail(new RefreshTokenCommand(login.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
         Assert.Equal("invalid_refresh_token", ex.Code);
 
         // the legitimate successor is dead as well
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(second.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(second.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
         Assert.All(app.RefreshTokens.Items, t => Assert.True(t.IsRevoked));
     }
 
@@ -93,9 +92,9 @@ public class RefreshTokenTests
     {
         using var app = new AppFixture();
 
-        var unknown = await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand("nope")));
+        var unknown = await app.Fail(new RefreshTokenCommand("nope"), ErrorType.Unauthorized, "invalid_refresh_token");
         Assert.Equal("invalid_refresh_token", unknown.Code);
-        await Assert.ThrowsAsync<ValidationException>(() => app.Send(new RefreshTokenCommand("")));
+        await app.Fail(new RefreshTokenCommand(""), ErrorType.Validation);
     }
 
     [Fact]
@@ -105,7 +104,7 @@ public class RefreshTokenTests
         using var _ = app;
         app.Clock.Advance(TimeSpan.FromDays(8)); // default lifetime is 7 days
 
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(login.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(login.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
     }
 
     [Fact]
@@ -117,15 +116,15 @@ public class RefreshTokenTests
         app.Users.Seed("john", password: Password);
         var start = app.Clock.GetUtcNow();
 
-        var login = await app.Send(new LoginCommand("john", Password));
+        var login = await app.Ok(new LoginCommand("john", Password));
         Assert.Equal(start.AddDays(10), login.RefreshTokenExpiresAt);
 
         app.Clock.Advance(TimeSpan.FromDays(9));
-        var day9 = await app.Send(new RefreshTokenCommand(login.RefreshToken!));
+        var day9 = await app.Ok(new RefreshTokenCommand(login.RefreshToken!));
         Assert.Equal(start.AddDays(15), day9.RefreshTokenExpiresAt); // capped, not day 19
 
         app.Clock.Advance(TimeSpan.FromDays(7)); // day 16: past the absolute limit
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(day9.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(day9.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
     }
 
     [Fact]
@@ -135,7 +134,7 @@ public class RefreshTokenTests
         using var _ = app;
         user.Deactivate(app.Clock.GetUtcNow());
 
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(login.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(login.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
         Assert.All(app.RefreshTokens.Items, t => Assert.True(t.IsRevoked));
     }
 
@@ -146,7 +145,7 @@ public class RefreshTokenTests
         using var _ = app;
         user.Rename("johnny", app.Clock.GetUtcNow()); // rotates the stamp
 
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(login.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(login.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
     }
 
     [Fact]
@@ -157,11 +156,11 @@ public class RefreshTokenTests
         app.Current.SignInAs(user);
         const string newPassword = "Brand#New-Passw0rd";
 
-        var changed = await app.Send(new ChangePasswordCommand(Password, newPassword, newPassword));
+        var changed = await app.Ok(new ChangePasswordCommand(Password, newPassword, newPassword));
 
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(login.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(login.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
         Assert.False(string.IsNullOrWhiteSpace(changed.RefreshToken));
-        var again = await app.Send(new RefreshTokenCommand(changed.RefreshToken!));
+        var again = await app.Ok(new RefreshTokenCommand(changed.RefreshToken!));
         Assert.NotEqual(changed.RefreshToken, again.RefreshToken);
     }
 
@@ -172,9 +171,9 @@ public class RefreshTokenTests
         using var _ = app;
         app.SignInAsAdmin();
 
-        await app.Send(new ResetUserPasswordCommand(user.Id));
+        await app.Ok(new ResetUserPasswordCommand(user.Id));
 
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(login.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(login.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
     }
 
     [Fact]
@@ -184,10 +183,10 @@ public class RefreshTokenTests
         using var _ = app;
         app.SignInAsAdmin();
 
-        await app.Send(new UpdateUserCommand(user.Id, user.Username, UserRole.Admin));
+        await app.Ok(new UpdateUserCommand(user.Id, user.Username, UserRole.Admin));
 
         Assert.True(app.RefreshTokens.Items.Single().IsRevoked);
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(login.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(login.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
     }
 
     [Fact]
@@ -196,10 +195,10 @@ public class RefreshTokenTests
         var (app, _, login) = await LoggedIn();
         using var _ = app;
 
-        await app.Send(new LogoutCommand(login.RefreshToken!));
-        await app.Send(new LogoutCommand("not-a-real-token")); // must not throw or reveal anything
+        await app.OkVoid(new LogoutCommand(login.RefreshToken!));
+        await app.OkVoid(new LogoutCommand("not-a-real-token")); // must not throw or reveal anything
 
-        await Assert.ThrowsAsync<UnauthorizedException>(() => app.Send(new RefreshTokenCommand(login.RefreshToken!)));
+        await app.Fail(new RefreshTokenCommand(login.RefreshToken!), ErrorType.Unauthorized, "invalid_refresh_token");
         Assert.All(app.RefreshTokens.Items, t => Assert.True(t.IsRevoked));
     }
 
@@ -208,12 +207,12 @@ public class RefreshTokenTests
     {
         var (app, _, first) = await LoggedIn();
         using var _ = app;
-        var second = await app.Send(new LoginCommand("john", Password));
+        var second = await app.Ok(new LoginCommand("john", Password));
 
-        await app.Send(new LogoutCommand(first.RefreshToken!));
+        await app.OkVoid(new LogoutCommand(first.RefreshToken!));
 
         // the other device keeps working
-        var refreshed = await app.Send(new RefreshTokenCommand(second.RefreshToken!));
+        var refreshed = await app.Ok(new RefreshTokenCommand(second.RefreshToken!));
         Assert.False(string.IsNullOrWhiteSpace(refreshed.RefreshToken));
     }
 }
