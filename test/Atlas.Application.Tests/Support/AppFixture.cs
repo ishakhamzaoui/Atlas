@@ -21,7 +21,12 @@ public sealed class AppFixture : IDisposable
     public AppFixture()
     {
         var services = new ServiceCollection();
-        services.AddLogging(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(Logs));
+        // MediatR 13 logs a one-off license nag (Warning) on first use; it is a third-party notice, not application
+        // logging, so it must not pollute the warnings the tests assert on.
+        services.AddLogging(b => b
+            .SetMinimumLevel(LogLevel.Trace)
+            .AddFilter("LuckyPennySoftware.MediatR", LogLevel.None)
+            .AddProvider(Logs));
         services.AddApplication();
         services.AddSingleton<IUserRepository>(Users);
         services.AddSingleton<IUserWriteScope>(Users);

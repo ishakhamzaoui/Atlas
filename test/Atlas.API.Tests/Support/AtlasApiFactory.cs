@@ -32,6 +32,11 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
 
     public AtlasApiFactory()
     {
+        // The API only speaks HTTPS. WebApplicationFactory overwrites HttpClient.BaseAddress with ClientOptions.BaseAddress
+        // (default http://localhost) after ConfigureClient runs, so setting it here - not in ConfigureClient - is what
+        // actually makes the test clients talk HTTPS. Otherwise every request is 308-redirected by UseHttpsRedirection,
+        // and HttpClient silently drops the Authorization header when it follows the redirect (-> 401 on protected routes).
+        ClientOptions.BaseAddress = new Uri("https://localhost");
         _adminSession = new Lazy<Task<AdminSession>>(EstablishAdminSessionAsync);
     }
 
@@ -43,12 +48,8 @@ public sealed class AtlasApiFactory : WebApplicationFactory<Program>, IAsyncLife
 
     public sealed record AdminSession(LoginResponse FirstLogin, string Token);
 
-    // The API only speaks HTTPS, so test clients address it over https:// (TestServer sets Request.IsHttps accordingly).
-    protected override void ConfigureClient(HttpClient client)
-    {
-        base.ConfigureClient(client);
-        client.BaseAddress = new Uri("https://localhost");
-    }
+    // BaseAddress is set once via ClientOptions in the constructor: WebApplicationFactory resets HttpClient.BaseAddress to
+    // ClientOptions.BaseAddress after ConfigureClient, so overriding ConfigureClient would not survive.
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

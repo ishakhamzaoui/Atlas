@@ -15,7 +15,6 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace Atlas.API.Controllers;
 
 [Route("api/v1/auth")]
-[Produces("application/json")]
 public sealed class AuthController(ISender sender) : ApiControllerBase
 {
     /// <summary>Authenticate with username and password and receive a JWT access token.</summary>

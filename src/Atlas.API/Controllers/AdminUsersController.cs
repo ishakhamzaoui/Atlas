@@ -17,7 +17,6 @@ namespace Atlas.API.Controllers;
 /// <summary>User administration. Administrators only; enforced by policy here and again in the application layer.</summary>
 [Route("api/v1/admin/users")]
 [Authorize(Policy = Policies.AdminOnly)]
-[Produces("application/json")]
 [ProducesResponseType(StatusCodes.Status401Unauthorized)]
 [ProducesResponseType(StatusCodes.Status403Forbidden)]
 public sealed class AdminUsersController(ISender sender) : ApiControllerBase
