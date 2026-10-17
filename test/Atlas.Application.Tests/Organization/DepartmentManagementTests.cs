@@ -115,7 +115,7 @@ public class DepartmentManagementTests
         app.SignInAsAdmin();
         var a = app.Departments.Seed("Alpha");
         app.Departments.Seed("Beta");
-        await app.Ok(new AssignUserToDepartmentCommand(app.Users.Seed("u1").Id, a.Id));
+        await app.Ok(new AssignUserToDepartmentCommand(app.Users.Seed("user1").Id, a.Id));
 
         var page = await app.Ok(new ListDepartmentsQuery(1, 10, null));
         Assert.Equal(2, page.TotalCount);

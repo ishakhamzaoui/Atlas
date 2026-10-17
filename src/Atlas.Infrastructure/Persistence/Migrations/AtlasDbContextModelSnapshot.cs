@@ -91,6 +91,96 @@ namespace Atlas.Infrastructure.Persistence.Migrations
                     b.ToTable("refresh_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Atlas.Domain.Organization.Department", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid?>("HeadUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("head_user_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("normalized_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_departments");
+
+                    b.HasIndex("HeadUserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_departments_head_user_id");
+
+                    b.HasIndex("NormalizedName")
+                        .IsUnique()
+                        .HasDatabaseName("ux_departments_normalized_name");
+
+                    b.ToTable("departments", (string)null);
+                });
+
+            modelBuilder.Entity("Atlas.Domain.Organization.Profile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("normalized_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_profiles");
+
+                    b.HasIndex("NormalizedName")
+                        .IsUnique()
+                        .HasDatabaseName("ux_profiles_normalized_name");
+
+                    b.ToTable("profiles", (string)null);
+                });
+
             modelBuilder.Entity("Atlas.Domain.Users.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -100,6 +190,10 @@ namespace Atlas.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("department_id");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
@@ -124,6 +218,10 @@ namespace Atlas.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("password_hash");
+
+                    b.Property<Guid?>("ProfileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("profile_id");
 
                     b.Property<string>("Role")
                         .IsRequired()
@@ -154,9 +252,15 @@ namespace Atlas.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_users");
 
+                    b.HasIndex("DepartmentId")
+                        .HasDatabaseName("ix_users_department_id");
+
                     b.HasIndex("NormalizedUsername")
                         .IsUnique()
                         .HasDatabaseName("ux_users_normalized_username");
+
+                    b.HasIndex("ProfileId")
+                        .HasDatabaseName("ix_users_profile_id");
 
                     b.HasIndex("Role", "IsActive")
                         .HasDatabaseName("ix_users_role_is_active");
@@ -179,6 +283,30 @@ namespace Atlas.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_refresh_tokens_users_user_id");
+                });
+
+            modelBuilder.Entity("Atlas.Domain.Organization.Department", b =>
+                {
+                    b.HasOne("Atlas.Domain.Users.User", null)
+                        .WithMany()
+                        .HasForeignKey("HeadUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_departments_users_head_user_id");
+                });
+
+            modelBuilder.Entity("Atlas.Domain.Users.User", b =>
+                {
+                    b.HasOne("Atlas.Domain.Organization.Department", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_users_departments_department_id");
+
+                    b.HasOne("Atlas.Domain.Organization.Profile", null)
+                        .WithMany()
+                        .HasForeignKey("ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_users_profiles_profile_id");
                 });
 #pragma warning restore 612, 618
         }

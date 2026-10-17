@@ -21,9 +21,9 @@ public class SpaceAccessPolicyTests
     public void Every_authenticated_user_reads_the_public_space_whatever_their_state()
     {
         var orphan = Ordinary();
-        var deptOnly = Ordinary("a", DeptA);
-        var profileOnly = Ordinary("b", null, Guid.NewGuid());
-        var full = Ordinary("c", DeptA, Guid.NewGuid());
+        var deptOnly = Ordinary("deptOnly", DeptA);
+        var profileOnly = Ordinary("profileOnly", null, Guid.NewGuid());
+        var full = Ordinary("fullMember", DeptA, Guid.NewGuid());
         var admin = User.Create("root.admin", "hash", UserRole.Admin, false, T0);
 
         foreach (var user in new[] { orphan, deptOnly, profileOnly, full, admin })
@@ -42,7 +42,7 @@ public class SpaceAccessPolicyTests
     [Fact]
     public void Member_with_profile_reaches_own_private_and_own_department_space_only()
     {
-        var member = Ordinary("m", DeptA, Guid.NewGuid());
+        var member = Ordinary("member", DeptA, Guid.NewGuid());
 
         Assert.Equal(SpaceAccess.Read, SpaceAccessPolicy.Evaluate(member, DataSpace.PrivateOf(member.Id)));
         Assert.Equal(SpaceAccess.Read, SpaceAccessPolicy.Evaluate(member, DataSpace.DepartmentOf(DeptA)));
@@ -61,8 +61,8 @@ public class SpaceAccessPolicyTests
     [Fact]
     public void Department_without_profile_or_profile_without_department_gives_no_organizational_access()
     {
-        var noProfile = Ordinary("a", DeptA);
-        var noDepartment = Ordinary("b", null, Guid.NewGuid());
+        var noProfile = Ordinary("noProfile", DeptA);
+        var noDepartment = Ordinary("noDepartment", null, Guid.NewGuid());
 
         Assert.Equal(SpaceAccess.None, SpaceAccessPolicy.Evaluate(noProfile, DataSpace.DepartmentOf(DeptA)));
         Assert.Equal(SpaceAccess.None, SpaceAccessPolicy.Evaluate(noProfile, DataSpace.PrivateOf(noProfile.Id)));
@@ -81,7 +81,7 @@ public class SpaceAccessPolicyTests
     [Fact]
     public void Inactive_accounts_get_nothing()
     {
-        var user = Ordinary("a", DeptA, Guid.NewGuid());
+        var user = Ordinary("inactive", DeptA, Guid.NewGuid());
         user.Deactivate(T0);
 
         Assert.Equal(SpaceAccess.None, SpaceAccessPolicy.Evaluate(user, DataSpace.Public));
@@ -91,7 +91,7 @@ public class SpaceAccessPolicyTests
     [Fact]
     public void Write_is_never_granted_in_this_phase()
     {
-        var member = Ordinary("m", DeptA, Guid.NewGuid());
+        var member = Ordinary("member", DeptA, Guid.NewGuid());
         var spaces = new[] { DataSpace.Public, DataSpace.PrivateOf(member.Id), DataSpace.DepartmentOf(DeptA) };
 
         foreach (var space in spaces)
@@ -102,7 +102,7 @@ public class SpaceAccessPolicyTests
     public void Access_does_not_depend_on_having_a_department_head()
     {
         // The policy has no notion of a head at all: a headless department's members are unaffected.
-        var member = Ordinary("m", DeptA, Guid.NewGuid());
+        var member = Ordinary("member", DeptA, Guid.NewGuid());
         Assert.Equal(SpaceAccess.Read, SpaceAccessPolicy.Evaluate(member, DataSpace.DepartmentOf(DeptA)));
     }
 }

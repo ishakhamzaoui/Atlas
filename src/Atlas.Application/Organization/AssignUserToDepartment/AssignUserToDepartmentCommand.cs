@@ -1,6 +1,7 @@
 ﻿using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Behaviors;
 using Atlas.Application.Common.Results;
+using Atlas.Application.Users;
 using Atlas.Domain.Users;
 using FluentValidation;
 using MediatR;
