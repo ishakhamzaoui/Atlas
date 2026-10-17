@@ -14,12 +14,16 @@ public sealed class AppFixture : IDisposable
     public FakeUserRepository Users { get; } = new();
     public FakeCurrentUser Current { get; } = new();
     public FakeRefreshTokenRepository RefreshTokens { get; } = new();
+    public FakeDepartmentRepository Departments { get; }
+    public FakeProfileRepository Profiles { get; }
     public FakeRefreshTokenProvider RefreshProvider { get; } = new();
     public MutableClock Clock { get; } = new(new DateTimeOffset(2026, 6, 1, 12, 0, 0, TimeSpan.Zero));
     public CapturingLoggerProvider Logs { get; } = new();
 
     public AppFixture()
     {
+        Departments = new FakeDepartmentRepository(Users);
+        Profiles = new FakeProfileRepository(Users);
         var services = new ServiceCollection();
         // MediatR 13 logs a one-off license nag (Warning) on first use; it is a third-party notice, not application
         // logging, so it must not pollute the warnings the tests assert on.
@@ -30,6 +34,8 @@ public sealed class AppFixture : IDisposable
         services.AddApplication();
         services.AddSingleton<IUserRepository>(Users);
         services.AddSingleton<IUserWriteScope>(Users);
+        services.AddSingleton<IDepartmentRepository>(Departments);
+        services.AddSingleton<IProfileRepository>(Profiles);
         services.AddSingleton<ICurrentUser>(Current);
         services.AddSingleton<IPasswordHasher, FakePasswordHasher>();
         services.AddSingleton<IPasswordGenerator, FakePasswordGenerator>();

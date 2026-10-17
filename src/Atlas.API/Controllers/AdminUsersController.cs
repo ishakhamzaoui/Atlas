@@ -1,6 +1,11 @@
 using Atlas.API.Contracts;
 using Atlas.API.Security;
 using Atlas.Application.Common;
+using Atlas.Application.Organization;
+using Atlas.Application.Organization.AssignUserToDepartment;
+using Atlas.Application.Organization.RemoveUserFromDepartment;
+using Atlas.Application.Profiles.AssignProfile;
+using Atlas.Application.Profiles.RemoveProfile;
 using Atlas.Application.Users;
 using Atlas.Application.Users.CreateUser;
 using Atlas.Application.Users.GetUser;
@@ -40,7 +45,8 @@ public sealed class AdminUsersController(ISender sender) : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<UserDto>>> List([FromQuery] ListUsersRequest request, CancellationToken cancellationToken) =>
         Respond(await sender.Send(
-            new ListUsersQuery(request.Page, request.PageSize, request.Search, request.Role, request.IsActive),
+            new ListUsersQuery(request.Page, request.PageSize, request.Search, request.Role, request.IsActive,
+                request.DepartmentId, request.ProfileId, request.Orphan),
             cancellationToken));
 
     /// <summary>Get a user's safe profile.</summary>
@@ -76,4 +82,48 @@ public sealed class AdminUsersController(ISender sender) : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<ResetPasswordResponse>> ResetPassword(Guid id, CancellationToken cancellationToken) =>
         Respond(await sender.Send(new ResetUserPasswordCommand(id), cancellationToken));
+
+    /// <summary>Put the user in a department: join (from no department) or move (from another department).</summary>
+    /// <remarks>
+    /// No transfer request or approval is needed. Membership is exclusive, so any previous membership ends. When the user MOVES
+    /// from another department, the old department's head role (if held) ends and the profile association is removed (the profile
+    /// is retained) so no access to the former department survives; pass <c>profileId</c> to give a profile in the same call.
+    /// A user joining from no department keeps an existing profile unless <c>profileId</c> replaces it. The response lists these
+    /// side effects explicitly. Administrator accounts cannot join departments.
+    /// </remarks>
+    [HttpPut("{id:guid}/department")]
+    [ProducesResponseType<OrganizationChangeDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<OrganizationChangeDto>> AssignDepartment(Guid id, AssignDepartmentRequest request, CancellationToken cancellationToken) =>
+        Respond(await sender.Send(new AssignUserToDepartmentCommand(id, request.DepartmentId, request.ProfileId), cancellationToken));
+
+    /// <summary>Take the user out of their department (the account is kept).</summary>
+    /// <remarks>
+    /// The department head role (if held) ends without a replacement, and the profile association is removed (the profile is
+    /// retained), leaving an orphan user who can only read the public space. Idempotent.
+    /// </remarks>
+    [HttpDelete("{id:guid}/department")]
+    [ProducesResponseType<OrganizationChangeDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OrganizationChangeDto>> RemoveDepartment(Guid id, CancellationToken cancellationToken) =>
+        Respond(await sender.Send(new RemoveUserFromDepartmentCommand(id), cancellationToken));
+
+    /// <summary>Assign or replace the user's profile (independent of department membership).</summary>
+    /// <remarks>The replaced profile is retained and stays available for other users. Administrator accounts cannot hold profiles.</remarks>
+    [HttpPut("{id:guid}/profile")]
+    [ProducesResponseType<UserDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<UserDto>> AssignProfile(Guid id, AssignProfileRequest request, CancellationToken cancellationToken) =>
+        Respond(await sender.Send(new AssignProfileCommand(id, request.ProfileId), cancellationToken));
+
+    /// <summary>Remove the user's profile association. The profile itself is retained. Idempotent.</summary>
+    [HttpDelete("{id:guid}/profile")]
+    [ProducesResponseType<UserDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserDto>> RemoveProfile(Guid id, CancellationToken cancellationToken) =>
+        Respond(await sender.Send(new RemoveProfileCommand(id), cancellationToken));
 }

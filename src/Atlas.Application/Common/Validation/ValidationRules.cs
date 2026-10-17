@@ -1,3 +1,4 @@
+﻿using Atlas.Domain.Organization;
 using Atlas.Domain.Users;
 using FluentValidation;
 
@@ -18,6 +19,20 @@ public static class ValidationRules
         {
             var username = usernameSelector?.Invoke(context.InstanceToValidate);
             foreach (var error in PasswordPolicy.Validate(value, username))
+                context.AddFailure(error);
+        });
+
+    public static IRuleBuilderOptionsConditions<T, string> MustBeValidOrganizationName<T>(this IRuleBuilder<T, string> rule) =>
+        rule.Custom((value, context) =>
+        {
+            foreach (var error in OrganizationNamePolicy.ValidateName(value))
+                context.AddFailure(error);
+        });
+
+    public static IRuleBuilderOptionsConditions<T, string?> MustBeValidDescription<T>(this IRuleBuilder<T, string?> rule) =>
+        rule.Custom((value, context) =>
+        {
+            foreach (var error in OrganizationNamePolicy.ValidateDescription(value))
                 context.AddFailure(error);
         });
 }

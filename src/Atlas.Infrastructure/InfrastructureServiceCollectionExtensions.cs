@@ -1,4 +1,4 @@
-using Atlas.Application.Common.Abstractions;
+﻿using Atlas.Application.Common.Abstractions;
 using Atlas.Infrastructure.Persistence;
 using Atlas.Infrastructure.Persistence.Repositories;
 using Atlas.Infrastructure.Security;
@@ -45,6 +45,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IUserWriteScope, UserWriteScope>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IDepartmentRepository, DepartmentRepository>();
+        services.AddScoped<IProfileRepository, ProfileRepository>();
         services.AddHostedService<RefreshTokenCleanupService>();
         services.AddScoped<IUserSessionValidator, UserSessionValidator>();
 

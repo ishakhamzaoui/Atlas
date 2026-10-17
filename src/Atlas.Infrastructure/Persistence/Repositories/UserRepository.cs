@@ -1,4 +1,4 @@
-using Atlas.Application.Common;
+﻿using Atlas.Application.Common;
 using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Exceptions;
 using Atlas.Domain.Users;
@@ -33,6 +33,14 @@ public sealed class UserRepository(AtlasDbContext db) : IUserRepository
 
         if (filter.Role is { } role) query = query.Where(u => u.Role == role);
         if (filter.IsActive is { } active) query = query.Where(u => u.IsActive == active);
+        if (filter.DepartmentId is { } departmentId) query = query.Where(u => u.DepartmentId == departmentId);
+        if (filter.ProfileId is { } profileId) query = query.Where(u => u.ProfileId == profileId);
+        if (filter.Orphan is { } orphan)
+        {
+            query = orphan
+                ? query.Where(u => u.Role == UserRole.User && u.DepartmentId == null && u.ProfileId == null)
+                : query.Where(u => u.DepartmentId != null || u.ProfileId != null);
+        }
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             // Parameterised substring match on the normalised column; no wildcard injection, no raw SQL.

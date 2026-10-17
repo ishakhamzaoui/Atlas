@@ -127,8 +127,9 @@ export Serilog__WriteTo__1__Args__retainedFileCountLimit=14
 Tooling: `dotnet tool install --global dotnet-ef`. Run from the repository root with the connection string exported.
 
 ```bash
-# the refresh-token table (this change set) - generate once and commit the output
-dotnet ef migrations add AddRefreshTokens \
+# new schema changes: generate ONE migration per change set, on one machine, and commit the output
+# (the organization model needs: dotnet ef migrations add AddOrganization ...)
+dotnet ef migrations add <MigrationName> \
   --project src/Atlas.Infrastructure --startup-project src/Atlas.API --output-dir Persistence/Migrations
 
 dotnet ef database update --project src/Atlas.Infrastructure --startup-project src/Atlas.API
@@ -139,7 +140,7 @@ dotnet ef migrations bundle --project src/Atlas.Infrastructure --startup-project
 ./atlas-migrate --connection "$ConnectionStrings__Atlas"
 ```
 
-Schema: `users` (unique normalized username, check constraints, `xmin` concurrency) and `refresh_tokens`
+Schema: `users` (unique normalized username, check constraints, `xmin` concurrency, optional `department_id` / `profile_id`), `departments`, `profiles` and `refresh_tokens`
 (SHA-256 token hash unique, family id, security-stamp snapshot, expiry/absolute expiry, revoked/replaced-by, FK to users with cascade delete).
 
 ## First-run administrator bootstrap
@@ -172,6 +173,77 @@ Refresh-token lifecycle and storage:
 * An hourly background job deletes tokens that expired more than 7 days ago.
 * Sent in the JSON body (no cookies), so there is no CSRF surface; use HTTPS (enforced) and keep tokens out of URLs.
 
+## Organization model: users, profiles, departments and data spaces
+
+This is the current, deliberately minimal organizational foundation. Detailed data permissions are a later phase (see "Not part of this phase").
+
+### Concepts
+
+| Concept | What it is |
+|---|---|
+| **User** | An account that authenticates. It exists independently of any department or profile. |
+| **Profile** | Defines a user's access privileges. Separate from the account: it can be assigned, replaced and removed without touching the account, and it is **never deleted** by removing/moving users. This phase models the profile itself; the concrete privileges arrive with the data-management phase. A profile may be held by several users. |
+| **Department** | An organizational unit; its members share the department's data space. Membership is **exclusive** (at most one department per user). May have no members and no head. |
+| **Department head** | An optional member designated to lead a department. Extra head privileges are defined later. |
+| **Orphan user** | An ordinary account with **no department and no profile**. It can authenticate but only reads the public space. Administrator accounts are not orphans. |
+
+There is no Center Manager and there are no groups. Only **administrators** manage accounts, profiles, departments, membership and heads.
+Administrator accounts are outside the organization: they cannot join a department or hold a profile, and a user who still has either cannot be promoted to administrator (remove them first).
+
+### Rules
+
+* A user may exist without a profile and without a department; a user may be in a department without a profile (administrative transition). **None of this is a database constraint**: both columns (`users.department_id`, `users.profile_id`) are nullable and the application models each state explicitly.
+* A department may have no head. The head must be a **member of that department**, so a user in no department can never be a head (enforced by the use cases under a global advisory lock; the database guarantees the references are valid and that a user leads at most one department).
+* Removing or moving a head, or clearing the head, **never requires a replacement**; a headless department keeps working.
+* There is no transfer request, approval or replacement workflow: every change is a direct administrative operation.
+* Removing a user from a department never deletes the account or any profile.
+
+### What happens to the rest of the user's state (explicit, and reported in the response)
+
+| Operation | Department head role | Profile association |
+|---|---|---|
+| `PUT /users/{id}/department` - user had **no** department | n/a | kept unless `profileId` replaces it |
+| `PUT /users/{id}/department` - **moving** from another department | previous department loses its head if it was this user (the user does not become head of the new one) | **detached** (profile retained), unless `profileId` assigns one in the same call |
+| `PUT /users/{id}/department` - same department | untouched | `profileId`, if given, is applied |
+| `DELETE /users/{id}/department` | head role ends | **detached** (profile retained): the user becomes an orphan |
+| `PUT` / `DELETE /users/{id}/profile` | untouched | assigned or replaced / detached; the department is never changed |
+
+So a user never keeps access tied to a former department. The response (`OrganizationChangeDto`) lists `previousDepartmentId`, `removedProfileId` and `wasDepartmentHead`.
+Unassigned profiles stay available (`GET /admin/profiles?assigned=false`) for reassignment.
+
+### Data spaces: existence versus authorization
+
+Three logical spaces exist by construction, independent of heads, profiles or memberships:
+
+* **Private space** - one per user account (identified by the user id).
+* **Department space** - one per department (identified by the department id), shared by its members.
+* **Public space** - one platform-wide space.
+
+A space existing is **not** the same as being allowed to use it. `GET /api/v1/spaces/me` returns each space with `exists` and the caller's `access`.
+
+**Current authorization** (single class `SpaceAccessPolicy`; evaluated from the *current* database state on every request, never from the JWT, so an administrative change applies immediately):
+
+| Caller | Public space | Own private space | Own department's space | Anything else |
+|---|---|---|---|---|
+| Orphan user | Read | none | none | none |
+| Department member **without** a profile | Read | none | none | none |
+| Department member **with** a profile | Read | Read | Read | none |
+| Administrator | Read | none | none | none |
+
+"Read" on the private/department spaces currently means "may enter the space"; **nothing grants Write yet** (fail closed). Sharing a department never opens a colleague's private space, and the department head has no extra access in this phase.
+Public means readable by every *authenticated* user, not anonymous. `GET /spaces/private/{id}` and `GET /spaces/departments/{id}` return 403 before revealing anything about the space.
+
+### Not part of this phase (deferred to the data-management phase)
+
+Folder/object/item permissions, read-write rules per profile and role, item ownership and department-head modification privileges, profile merging, data migration between profiles, delegation policies, and any department deletion.
+The extension point is `SpaceAccessPolicy`: later phases change that one class (and add concrete privileges to profiles) without altering the model, the endpoints or the organizational use cases.
+
+### Migrating an existing database
+
+The organization columns are nullable and new tables are additive, so existing users simply become orphans: no backfill is needed.
+Generate and commit the migration once, then apply it everywhere:
+`dotnet ef migrations add AddOrganization --project src/Atlas.Infrastructure --startup-project src/Atlas.API --output-dir Persistence/Migrations`
+
 ## Endpoints
 
 | Method | Route | Access |
@@ -185,6 +257,18 @@ Refresh-token lifecycle and storage:
 | GET/PUT | `/api/v1/admin/users/{id}` | Admin |
 | PATCH | `/api/v1/admin/users/{id}/status` | Admin |
 | POST | `/api/v1/admin/users/{id}/reset-password` | Admin (one-time temporary password) |
+| GET/POST | `/api/v1/admin/departments` | Admin |
+| GET/PUT | `/api/v1/admin/departments/{id}` | Admin |
+| GET | `/api/v1/admin/departments/{id}/members` | Admin |
+| PUT/DELETE | `/api/v1/admin/departments/{id}/head` | Admin (appoint or replace / remove, no replacement needed) |
+| GET/POST | `/api/v1/admin/profiles` | Admin |
+| GET/PUT | `/api/v1/admin/profiles/{id}` | Admin |
+| PUT/DELETE | `/api/v1/admin/users/{id}/department` | Admin (join or move / remove) |
+| PUT/DELETE | `/api/v1/admin/users/{id}/profile` | Admin (assign or replace / remove) |
+| GET | `/api/v1/spaces/me` | any authenticated user (orphans included) |
+| GET | `/api/v1/spaces/public` | any authenticated user |
+| GET | `/api/v1/spaces/private/{userId}` | the owner, with organizational privileges |
+| GET | `/api/v1/spaces/departments/{departmentId}` | members of that department who hold a profile |
 
 ```json
 POST /api/v1/auth/login     { "username": "admin", "password": "<password>" }
@@ -193,7 +277,7 @@ POST /api/v1/auth/logout    { "refreshToken": "<refresh-token>" }
 POST /api/v1/auth/change-password { "currentPassword": "<current>", "newPassword": "<new>", "confirmNewPassword": "<new>" }
 ```
 
-Errors are RFC 7807 `application/problem+json` with a stable `code` (`validation_failed`, `invalid_credentials`, `invalid_refresh_token`, `username_taken`, `last_active_admin`, ...).
+Errors are RFC 7807 `application/problem+json` with a stable `code` (`validation_failed`, `invalid_credentials`, `invalid_refresh_token`, `username_taken`, `department_name_taken`, `profile_name_taken`, `head_must_be_department_member`, `admin_not_assignable`, `last_active_admin`, ...).
 Status codes: 400, 401, 403, 404, 409 conflict, 422 business rule, 429 rate limited.
 
 ## Swagger

@@ -1,3 +1,4 @@
+﻿using Atlas.Domain.Organization;
 using Atlas.Domain.Users;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -30,6 +31,19 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(u => u.UpdatedAt).HasColumnName("updated_at").IsRequired();
         builder.Property(u => u.PasswordChangedAt).HasColumnName("password_changed_at");
+
+        // Organization: BOTH assignments are optional (users may be orphans). The nullable department column is what makes
+        // membership exclusive: a user row can point at most one department.
+        builder.Property(u => u.DepartmentId).HasColumnName("department_id");
+        builder.Property(u => u.ProfileId).HasColumnName("profile_id");
+        builder.HasIndex(u => u.DepartmentId).HasDatabaseName("ix_users_department_id");
+        builder.HasIndex(u => u.ProfileId).HasDatabaseName("ix_users_profile_id");
+
+        // Removing a department/profile row must never cascade into accounts.
+        builder.HasOne<Department>().WithMany().HasForeignKey(u => u.DepartmentId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_users_departments_department_id");
+        builder.HasOne<Profile>().WithMany().HasForeignKey(u => u.ProfileId)
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_users_profiles_profile_id");
 
         // Case-insensitive uniqueness is enforced by the database, not just by application pre-checks.
         builder.HasIndex(u => u.NormalizedUsername).IsUnique().HasDatabaseName("ux_users_normalized_username");

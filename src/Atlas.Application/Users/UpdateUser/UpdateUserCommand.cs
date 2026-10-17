@@ -1,4 +1,4 @@
-using Atlas.Application.Common.Abstractions;
+﻿using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Behaviors;
 using Atlas.Application.Common.Exceptions;
 using Atlas.Application.Common.Results;
@@ -44,6 +44,10 @@ public sealed class UpdateUserCommandHandler(
             var roleChanges = request.Role != user.Role;
             if (roleChanges)
             {
+                if (request.Role == UserRole.Admin && (user.DepartmentId is not null || user.ProfileId is not null))
+                    return Error.BusinessRule("remove_organization_assignments_first",
+                        "Remove the user's department and profile before making the account an administrator.");
+
                 if (currentUser.UserId == user.Id)
                     return Error.BusinessRule("cannot_change_own_role", "You cannot change your own role.");
 

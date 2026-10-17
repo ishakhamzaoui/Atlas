@@ -1,10 +1,10 @@
-namespace Atlas.Application.Common.Abstractions;
+﻿namespace Atlas.Application.Common.Abstractions;
 
 public interface IUserWriteScope
 {
     /// <summary>
-    /// Runs <paramref name="action"/> in a transaction holding a cross-instance exclusive lock, so
-    /// "check administrator count, then change" sequences cannot race (last-administrator protection).
+    /// Runs <paramref name="action"/> in a transaction holding a cross-instance exclusive lock, so read-check-write
+    /// sequences cannot race: last-administrator protection and all organization changes (department membership, heads, profiles).
     /// </summary>
     Task<T> RunExclusiveAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken);
 }

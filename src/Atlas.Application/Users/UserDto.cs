@@ -1,4 +1,4 @@
-using Atlas.Domain.Users;
+﻿using Atlas.Domain.Users;
 
 namespace Atlas.Application.Users;
 
@@ -10,10 +10,14 @@ public sealed record UserDto(
     bool IsActive,
     bool MustChangePassword,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? DepartmentId = null,
+    Guid? ProfileId = null,
+    bool IsOrphan = false);
 
 public static class UserMappings
 {
     public static UserDto ToDto(this User user) =>
-        new(user.Id, user.Username, user.Role.ToString(), user.IsActive, user.MustChangePassword, user.CreatedAt, user.UpdatedAt);
+        new(user.Id, user.Username, user.Role.ToString(), user.IsActive, user.MustChangePassword, user.CreatedAt, user.UpdatedAt,
+            user.DepartmentId, user.ProfileId, user.IsOrphan);
 }

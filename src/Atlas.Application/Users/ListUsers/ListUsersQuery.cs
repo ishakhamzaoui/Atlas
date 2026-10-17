@@ -1,4 +1,4 @@
-using Atlas.Application.Common;
+﻿using Atlas.Application.Common;
 using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Behaviors;
 using Atlas.Application.Common.Results;
@@ -8,7 +8,12 @@ using MediatR;
 
 namespace Atlas.Application.Users.ListUsers;
 
-public sealed record ListUsersQuery(int Page, int PageSize, string? Search, UserRole? Role, bool? IsActive)
+/// <param name="DepartmentId">Only members of this department.</param>
+/// <param name="ProfileId">Only users holding this profile.</param>
+/// <param name="Orphan">true: only orphans (ordinary accounts with no department and no profile).</param>
+public sealed record ListUsersQuery(
+    int Page, int PageSize, string? Search, UserRole? Role, bool? IsActive,
+    Guid? DepartmentId = null, Guid? ProfileId = null, bool? Orphan = null)
     : IRequest<Result<PagedResult<UserDto>>>, IRequireAdmin;
 
 public sealed class ListUsersQueryValidator : AbstractValidator<ListUsersQuery>
@@ -30,7 +35,8 @@ public sealed class ListUsersQueryHandler(IUserRepository users)
     public async Task<Result<PagedResult<UserDto>>> Handle(ListUsersQuery request, CancellationToken cancellationToken)
     {
         var page = await users.ListAsync(
-            new UserListFilter(request.Page, request.PageSize, request.Search, request.Role, request.IsActive),
+            new UserListFilter(request.Page, request.PageSize, request.Search, request.Role, request.IsActive,
+                request.DepartmentId, request.ProfileId, request.Orphan),
             cancellationToken);
         return page.Map(u => u.ToDto());
     }

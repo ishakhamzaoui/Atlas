@@ -2,6 +2,7 @@
 using Atlas.Application.Common.Abstractions;
 using Atlas.Application.Common.Exceptions;
 using Atlas.Domain.Auth;
+using Atlas.Domain.Organization;
 using Atlas.Domain.Users;
 
 namespace Atlas.Application.Tests.Support;
@@ -36,6 +37,9 @@ public sealed class FakeUserRepository : IUserRepository, IUserWriteScope
         var q = Items.AsEnumerable();
         if (f.Role is { } r) q = q.Where(u => u.Role == r);
         if (f.IsActive is { } a) q = q.Where(u => u.IsActive == a);
+        if (f.DepartmentId is { } d) q = q.Where(u => u.DepartmentId == d);
+        if (f.ProfileId is { } p) q = q.Where(u => u.ProfileId == p);
+        if (f.Orphan is { } o) q = o ? q.Where(u => u.IsOrphan) : q.Where(u => u.DepartmentId is not null || u.ProfileId is not null);
         if (!string.IsNullOrWhiteSpace(f.Search))
         {
             var s = UsernamePolicy.Normalize(f.Search);
@@ -181,4 +185,108 @@ public sealed class CapturingLoggerProvider : Microsoft.Extensions.Logging.ILogg
             lock (owner._entries) owner._entries.Add(new CapturedLog(logLevel, category, formatter(state, exception), exception));
         }
     }
+}
+
+public sealed class FakeDepartmentRepository(FakeUserRepository users) : IDepartmentRepository
+{
+    public List<Department> Items { get; } = [];
+
+    public Task<Department?> GetByIdAsync(Guid id, CancellationToken ct) => Task.FromResult(Items.FirstOrDefault(d => d.Id == id));
+
+    public Task<DepartmentSummary?> GetSummaryAsync(Guid id, CancellationToken ct)
+    {
+        var department = Items.FirstOrDefault(d => d.Id == id);
+        return Task.FromResult(department is null ? null : Summarize(department));
+    }
+
+    public Task<bool> NameExistsAsync(string normalizedName, Guid? excludingDepartmentId, CancellationToken ct) =>
+        Task.FromResult(Items.Any(d => d.NormalizedName == normalizedName && d.Id != excludingDepartmentId));
+
+    public Task<PagedResult<DepartmentSummary>> ListAsync(DepartmentListFilter f, CancellationToken ct)
+    {
+        var q = Items.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(f.Search))
+        {
+            var s = OrganizationNamePolicy.Normalize(f.Search);
+            q = q.Where(d => d.NormalizedName.Contains(s));
+        }
+
+        var all = q.OrderBy(d => d.NormalizedName).ToList();
+        var page = all.Skip((f.Page - 1) * f.PageSize).Take(f.PageSize).Select(Summarize).ToList();
+        return Task.FromResult(new PagedResult<DepartmentSummary>(page, f.Page, f.PageSize, all.Count));
+    }
+
+    public Task AddAsync(Department department, CancellationToken ct)
+    {
+        if (Items.Any(d => d.NormalizedName == department.NormalizedName))
+            throw new PersistenceConflictException(PersistenceConflictKind.DuplicateDepartmentName);
+        Items.Add(department);
+        return Task.CompletedTask;
+    }
+
+    public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
+
+    public Department Seed(string name)
+    {
+        var department = Department.Create(name, null, DateTimeOffset.UtcNow);
+        Items.Add(department);
+        return department;
+    }
+
+    private DepartmentSummary Summarize(Department d) => new(
+        d,
+        users.Items.Count(u => u.DepartmentId == d.Id),
+        users.Items.FirstOrDefault(u => u.Id == d.HeadUserId)?.Username);
+}
+
+public sealed class FakeProfileRepository(FakeUserRepository users) : IProfileRepository
+{
+    public List<Profile> Items { get; } = [];
+
+    public Task<Profile?> GetByIdAsync(Guid id, CancellationToken ct) => Task.FromResult(Items.FirstOrDefault(p => p.Id == id));
+
+    public Task<ProfileSummary?> GetSummaryAsync(Guid id, CancellationToken ct)
+    {
+        var profile = Items.FirstOrDefault(p => p.Id == id);
+        return Task.FromResult(profile is null ? null : Summarize(profile));
+    }
+
+    public Task<bool> NameExistsAsync(string normalizedName, Guid? excludingProfileId, CancellationToken ct) =>
+        Task.FromResult(Items.Any(p => p.NormalizedName == normalizedName && p.Id != excludingProfileId));
+
+    public Task<PagedResult<ProfileSummary>> ListAsync(ProfileListFilter f, CancellationToken ct)
+    {
+        var q = Items.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(f.Search))
+        {
+            var s = OrganizationNamePolicy.Normalize(f.Search);
+            q = q.Where(p => p.NormalizedName.Contains(s));
+        }
+
+        if (f.Assigned is { } assigned)
+            q = q.Where(p => users.Items.Any(u => u.ProfileId == p.Id) == assigned);
+
+        var all = q.OrderBy(p => p.NormalizedName).ToList();
+        var page = all.Skip((f.Page - 1) * f.PageSize).Take(f.PageSize).Select(Summarize).ToList();
+        return Task.FromResult(new PagedResult<ProfileSummary>(page, f.Page, f.PageSize, all.Count));
+    }
+
+    public Task AddAsync(Profile profile, CancellationToken ct)
+    {
+        if (Items.Any(p => p.NormalizedName == profile.NormalizedName))
+            throw new PersistenceConflictException(PersistenceConflictKind.DuplicateProfileName);
+        Items.Add(profile);
+        return Task.CompletedTask;
+    }
+
+    public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
+
+    public Profile Seed(string name)
+    {
+        var profile = Profile.Create(name, null, DateTimeOffset.UtcNow);
+        Items.Add(profile);
+        return profile;
+    }
+
+    private ProfileSummary Summarize(Profile p) => new(p, users.Items.Count(u => u.ProfileId == p.Id));
 }

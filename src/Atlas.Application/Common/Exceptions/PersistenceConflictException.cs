@@ -1,8 +1,10 @@
-namespace Atlas.Application.Common.Exceptions;
+﻿namespace Atlas.Application.Common.Exceptions;
 
 public enum PersistenceConflictKind
 {
     DuplicateUsername,
+    DuplicateDepartmentName,
+    DuplicateProfileName,
     ConcurrentUpdate
 }
 
@@ -11,9 +13,13 @@ public enum PersistenceConflictKind
 /// Handlers that know what to do translate it into an <c>Error</c>; otherwise the API maps it to 409.
 /// </summary>
 public sealed class PersistenceConflictException(PersistenceConflictKind kind)
-    : Exception(kind == PersistenceConflictKind.DuplicateUsername
-        ? "That username is already in use."
-        : "The record was modified by someone else. Reload and try again.")
+    : Exception(kind switch
+    {
+        PersistenceConflictKind.DuplicateUsername => "That username is already in use.",
+        PersistenceConflictKind.DuplicateDepartmentName => "A department with that name already exists.",
+        PersistenceConflictKind.DuplicateProfileName => "A profile with that name already exists.",
+        _ => "The record was modified by someone else. Reload and try again."
+    })
 {
     public PersistenceConflictKind Kind { get; } = kind;
 }

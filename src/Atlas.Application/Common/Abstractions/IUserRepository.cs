@@ -2,7 +2,12 @@
 
 namespace Atlas.Application.Common.Abstractions;
 
-public sealed record UserListFilter(int Page, int PageSize, string? Search, UserRole? Role, bool? IsActive);
+/// <param name="DepartmentId">Only members of this department.</param>
+/// <param name="ProfileId">Only users holding this profile.</param>
+/// <param name="Orphan">true: only users with neither department nor profile; false: only users with at least one.</param>
+public sealed record UserListFilter(
+    int Page, int PageSize, string? Search, UserRole? Role, bool? IsActive,
+    Guid? DepartmentId = null, Guid? ProfileId = null, bool? Orphan = null);
 
 public interface IUserRepository
 {
